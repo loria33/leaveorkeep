@@ -9,10 +9,14 @@ import {
   StatusBar,
   Alert,
   ScrollView,
+  Linking,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useMedia } from '../context/MediaContext';
-import { requestMediaPermissions } from '../utils/permissions';
+import {
+  requestMediaPermissions,
+  checkMediaPermissionsWithRetry,
+} from '../utils/permissions';
 
 const { width, height } = Dimensions.get('window');
 
@@ -103,31 +107,82 @@ const Onboarding: React.FC = () => {
       const hasPermission = await requestMediaPermissions();
 
       if (hasPermission) {
-        setHasPermission(true);
-        setOnboardingComplete(true);
-        // Start scanning media in the background
-        scanMedia();
+        await completeOnboarding();
       } else {
-        Alert.alert(
-          'Permission Required',
-          'We need access to your photos to help organize them. Please enable permissions in your device settings.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Open Settings',
-              onPress: () => {
-                // TODO: Open app settings
-                console.log('Open app settings');
+        // If permission request failed, try checking again with retry logic
+        // This handles cases where permission was granted but not detected
+        const recheckPermission = await checkMediaPermissionsWithRetry();
+
+        if (recheckPermission) {
+          await completeOnboarding();
+        } else {
+          Alert.alert(
+            'Permission Required',
+            'We need access to your photos to help organize them. Please enable permissions in your device settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Open Settings',
+                onPress: handleOpenSettings,
               },
-            },
-          ],
-        );
+              {
+                text: 'Try Again',
+                onPress: handlePermissionRequest,
+              },
+            ],
+          );
+        }
       }
     } catch (error) {
-      console.error('Error requesting permissions:', error);
-      Alert.alert('Error', 'Failed to request permissions. Please try again.');
+      Alert.alert(
+        'Permission Error',
+        'There was an issue requesting permissions. Please try again or check your device settings.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Try Again',
+            onPress: handlePermissionRequest,
+          },
+          {
+            text: 'Open Settings',
+            onPress: handleOpenSettings,
+          },
+        ],
+      );
     } finally {
       setIsRequestingPermission(false);
+    }
+  };
+
+  const handleOpenSettings = () => {
+    Linking.openSettings();
+  };
+
+  const completeOnboarding = async () => {
+    setHasPermission(true);
+    setOnboardingComplete(true);
+
+    // Small delay to ensure state changes are processed properly on iPad
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Start scanning media in the background
+    scanMedia();
+  };
+
+  const handleGetStarted = async () => {
+    try {
+      const granted = await requestMediaPermissions();
+      if (granted) {
+        await completeOnboarding();
+      } else {
+        // Try again with retry logic
+        const recheckPermission = await checkMediaPermissionsWithRetry();
+        if (recheckPermission) {
+          await completeOnboarding();
+        }
+      }
+    } catch (error) {
+      // Error requesting permissions
     }
   };
 

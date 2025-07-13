@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, StyleSheet } from 'react-native';
+import { Text, StyleSheet, Platform } from 'react-native';
+import mobileAds, { MaxAdContentRating } from 'react-native-google-mobile-ads';
+import { request, PERMISSIONS, RESULTS } from 'react-native-permissions';
 
 // Context
 import { MediaProvider, useMedia } from './src/context/MediaContext';
@@ -81,8 +83,51 @@ const AppNavigator: React.FC = () => {
   );
 };
 
+// AdMob Initialization Function
+const initializeAdMob = async () => {
+  try {
+    // Initialize Mobile Ads SDK
+    await mobileAds().initialize();
+
+    // For iOS, request App Tracking Transparency permission
+    if (Platform.OS === 'ios') {
+      const trackingStatus = await request(
+        PERMISSIONS.IOS.APP_TRACKING_TRANSPARENCY,
+      );
+
+      switch (trackingStatus) {
+        case RESULTS.GRANTED:
+          // App Tracking Transparency granted
+          break;
+        case RESULTS.DENIED:
+          // App Tracking Transparency denied
+          break;
+        case RESULTS.UNAVAILABLE:
+          // App Tracking Transparency unavailable
+          break;
+        case RESULTS.BLOCKED:
+          // App Tracking Transparency blocked
+          break;
+      }
+    }
+
+    // Set ad serving options
+    await mobileAds().setRequestConfiguration({
+      maxAdContentRating: MaxAdContentRating.G, // General audiences
+      tagForChildDirectedTreatment: false,
+      tagForUnderAgeOfConsent: false,
+    });
+  } catch (error) {
+    // Failed to initialize Mobile Ads SDK
+  }
+};
+
 // App Root Component
 const App: React.FC = () => {
+  useEffect(() => {
+    initializeAdMob();
+  }, []);
+
   return (
     <MediaProvider>
       <NavigationContainer>

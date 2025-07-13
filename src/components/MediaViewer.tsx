@@ -14,6 +14,7 @@ import Video from 'react-native-video';
 import Share from 'react-native-share';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { useMedia, MediaItem } from '../context/MediaContext';
+import InterstitialAdManager from '../utils/InterstitialAdManager';
 
 // Import the share icon
 const shareIcon = require('../assets/share.png');
@@ -34,6 +35,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [showControls, setShowControls] = useState(true);
   const [remainingTime, setRemainingTime] = useState('');
+  const [isNavigating, setIsNavigating] = useState(false);
   const {
     addToTrash,
     canViewMedia,
@@ -45,6 +47,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   const translateX = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(1)).current;
+  const scale = useRef(new Animated.Value(1)).current;
 
   const currentItem = items[currentIndex];
 
@@ -58,9 +61,14 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
           return;
         }
 
-        const minutes = Math.floor(timeLeft / (1000 * 60));
+        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
         const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
-        setRemainingTime(`${minutes}:${seconds.toString().padStart(2, '0')}`);
+        setRemainingTime(
+          `${hours}:${minutes.toString().padStart(2, '0')}:${seconds
+            .toString()
+            .padStart(2, '0')}`,
+        );
       };
 
       updateTimer(); // Update immediately
@@ -69,18 +77,6 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       return () => clearInterval(interval);
     }
   }, [canViewMedia, getRemainingCooldownTime]);
-
-  // Debug: Log current item
-  React.useEffect(() => {
-    console.log('=== MediaViewer Debug ===');
-    console.log('Current item:', currentItem);
-    console.log('Current item URI:', currentItem?.uri);
-    console.log('Current item type:', currentItem?.type);
-    console.log('Current item filename:', currentItem?.filename);
-    console.log('Items length:', items.length);
-    console.log('Current index:', currentIndex);
-    console.log('=========================');
-  }, [currentItem]);
 
   // Increment view count when component mounts or index changes
   React.useEffect(() => {
@@ -105,26 +101,118 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
           <Text style={styles.blockedSubtext}>
             Time remaining until you can view more pictures
           </Text>
+
+          {/* Premium Subscription Options 
+          
+          <View style={styles.premiumContainer}>
+            <Text style={styles.premiumTitle}>Upgrade to Premium</Text>
+
+            <TouchableOpacity style={styles.premiumOption}>
+              <View style={styles.premiumOptionHeader}>
+                <Text style={styles.premiumOptionTitle}>👑 King User</Text>
+                <Text style={styles.premiumOptionPrice}>$2/month</Text>
+              </View>
+              <Text style={styles.premiumOptionDescription}>
+                • No ads{'\n'}• No lockout time{'\n'}• Unlimited viewing
+              </Text>
+              <TouchableOpacity style={styles.premiumButton}>
+                <Text style={styles.premiumButtonText}>Become King</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.premiumOption}>
+              <View style={styles.premiumOptionHeader}>
+                <Text style={styles.premiumOptionTitle}>
+                  ⚡ Ultra King User
+                </Text>
+                <Text style={styles.premiumOptionPrice}>$1/month</Text>
+              </View>
+              <Text style={styles.premiumOptionDescription}>
+                • No ads{'\n'}• Keep timer (viewing limits){'\n'}• Ad-free
+                experience
+              </Text>
+              <TouchableOpacity style={styles.premiumButton}>
+                <Text style={styles.premiumButtonText}>Become Ultra King</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </View>*/}
+
           <TouchableOpacity style={styles.blockedButton} onPress={onClose}>
-            <Text style={styles.blockedButtonText}>OK</Text>
+            <Text style={styles.blockedButtonText}>Close</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  const handleNext = () => {
-    if (currentIndex < items.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-    } else {
-      onClose();
+  const smoothNavigate = (direction: 'next' | 'prev') => {
+    if (isNavigating) return;
+
+    setIsNavigating(true);
+
+    const targetIndex =
+      direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+
+    // Check bounds
+    if (targetIndex < 0 || targetIndex >= items.length) {
+      setIsNavigating(false);
+      return;
     }
+
+    // Don't navigate if ad is showing
+    if (InterstitialAdManager.getInstance().isCurrentlyShowing()) {
+      setIsNavigating(false);
+      return;
+    }
+
+    // Animate the transition
+    const slideDistance = direction === 'next' ? -width : width;
+
+    Animated.parallel([
+      Animated.timing(translateX, {
+        toValue: slideDistance,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 0.7,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scale, {
+        toValue: 0.95,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      // Update the index
+      setCurrentIndex(targetIndex);
+      incrementViewCount();
+
+      // Reset animations for new item
+      translateX.setValue(0);
+      opacity.setValue(1);
+      scale.setValue(1);
+
+      // Handle ads after navigation and always reset navigation state
+      InterstitialAdManager.getInstance().handleSwipe(() => {
+        setIsNavigating(false);
+      });
+
+      // Also reset navigation state immediately if no ad is shown
+      // This ensures we can swipe again even without ads
+      setTimeout(() => {
+        setIsNavigating(false);
+      }, 100);
+    });
+  };
+
+  const handleNext = () => {
+    smoothNavigate('next');
   };
 
   const handlePrevious = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
-    }
+    smoothNavigate('prev');
   };
 
   const handleTrash = () => {
@@ -157,15 +245,15 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   };
 
   const handleShare = async () => {
-    try {
-      const shareOptions = {
-        url: currentItem.uri,
-        type: currentItem.type === 'video' ? 'video/*' : 'image/*',
-      };
+    if (!currentItem || currentItem.type === 'video') return;
 
-      await Share.open(shareOptions);
+    try {
+      await Share.open({
+        url: currentItem.uri,
+        type: 'image/*',
+      });
     } catch (error) {
-      console.error('Error sharing media:', error);
+      // Error sharing media
     }
   };
 
@@ -183,6 +271,25 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
 
   const onHandlerStateChange = (event: any) => {
     if (event.nativeEvent.state === State.END) {
+      // Don't handle gestures while navigating or showing ads
+      if (
+        isNavigating ||
+        InterstitialAdManager.getInstance().isCurrentlyShowing()
+      ) {
+        // Reset position if we're in the middle of navigation
+        Animated.parallel([
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }),
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+          }),
+        ]).start();
+        return;
+      }
+
       const { translationX, translationY, velocityX, velocityY } =
         event.nativeEvent;
 
@@ -192,26 +299,32 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         return;
       }
 
-      // Check for horizontal swipes (navigation)
-      if (translationX > 100 || velocityX > 1000) {
+      // Check for horizontal swipes (navigation) with improved thresholds
+      const horizontalThreshold = 80; // Reduced from 100 for more responsive swipes
+      const velocityThreshold = 800; // Reduced from 1000 for more responsive swipes
+
+      if (translationX > horizontalThreshold || velocityX > velocityThreshold) {
         // Swipe right - previous image
         handlePrevious();
-      } else if (translationX < -100 || velocityX < -1000) {
+      } else if (
+        translationX < -horizontalThreshold ||
+        velocityX < -velocityThreshold
+      ) {
         // Swipe left - next image
         handleNext();
+      } else {
+        // Reset position for small swipes
+        Animated.parallel([
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }),
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+          }),
+        ]).start();
       }
-
-      // Reset position
-      Animated.parallel([
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-        }),
-        Animated.spring(translateY, {
-          toValue: 0,
-          useNativeDriver: true,
-        }),
-      ]).start();
     }
   };
 
@@ -241,6 +354,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
                 transform: [
                   { translateX: translateX },
                   { translateY: translateY },
+                  { scale: scale },
                 ],
                 opacity: opacity,
               },
@@ -253,9 +367,8 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
                 resizeMode="contain"
                 controls={showControls}
                 paused={false}
-                onError={(error: any) => {
-                  console.error('Video error:', error);
-                  Alert.alert('Error', 'Failed to load video');
+                onError={error => {
+                  // Video error
                 }}
               />
             ) : (
@@ -264,11 +377,10 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
                 style={styles.media}
                 resizeMode="contain"
                 onError={() => {
-                  console.error('Image error for URI:', currentItem.uri);
-                  Alert.alert('Error', 'Failed to load image');
+                  // Image error
                 }}
                 onLoad={() => {
-                  console.log('Image loaded successfully');
+                  // Image loaded successfully
                 }}
               />
             )}
@@ -316,6 +428,9 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
           <View style={styles.instructionsContainer}>
             <Text style={styles.instructionText}>
               ← → Navigate • ↑ Trash • Tap to hide controls
+            </Text>
+            <Text style={styles.instructionSubText}>
+              Ad every 5 swipes • Closes automatically to next item
             </Text>
           </View>
         </View>
@@ -449,6 +564,17 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 12,
   },
+  instructionSubText: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 10,
+    fontWeight: '400',
+    textAlign: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 4,
+  },
   blockedContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -496,6 +622,57 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 10,
+    textAlign: 'center',
+  },
+  premiumContainer: {
+    marginTop: 20,
+    width: '100%',
+    paddingHorizontal: 20,
+  },
+  premiumTitle: {
+    fontSize: 20,
+    color: '#fff',
+    fontWeight: 'bold',
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  premiumOption: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 15,
+  },
+  premiumOptionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  premiumOptionTitle: {
+    fontSize: 18,
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  premiumOptionPrice: {
+    fontSize: 16,
+    color: '#007bff',
+    fontWeight: 'bold',
+  },
+  premiumOptionDescription: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginBottom: 15,
+  },
+  premiumButton: {
+    backgroundColor: '#007bff',
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 8,
+  },
+  premiumButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
     textAlign: 'center',
   },
 });

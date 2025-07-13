@@ -1,8 +1,8 @@
 // App Configuration Constants
 export const APP_CONFIG = {
   // Viewing Limits
-  MAX_VIEWS: 30, // Maximum number of pictures that can be viewed
-  COOLDOWN_HOURS: 1, // Hours to wait before viewing again (6 minutes)
+  MAX_VIEWS: 35, // Maximum number of pictures that can be viewed
+  COOLDOWN_HOURS: 3, // Hours to wait before viewing again (6 minutes)
 };
 
 // Get current configuration

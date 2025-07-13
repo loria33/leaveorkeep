@@ -16,16 +16,28 @@
                     <view key="view" contentMode="scaleToFill" id="Ze5-6b-2t3">
                         <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFill" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="logo 2.jpeg" translatesAutoresizingMaskIntoConstraints="NO" id="Og5-Hc-bg2">
+                                <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
+                            </imageView>
+                        </subviews>
                         <viewLayoutGuide key="safeArea" id="Bcu-3y-fUS"/>
                         <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                        <constraints>
+                            <constraint firstItem="Og5-Hc-bg2" firstAttribute="top" secondItem="Ze5-6b-2t3" secondAttribute="top" id="2gF-Zj-8bV"/>
+                            <constraint firstAttribute="bottom" secondItem="Og5-Hc-bg2" secondAttribute="bottom" id="7YN-2a-eJx"/>
+                            <constraint firstAttribute="trailing" secondItem="Og5-Hc-bg2" secondAttribute="trailing" id="Efb-8H-mGR"/>
+                            <constraint firstItem="Og5-Hc-bg2" firstAttribute="leading" secondItem="Ze5-6b-2t3" secondAttribute="leading" id="oHD-6J-K0w"/>
+                        </constraints>
                     </view>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="iYj-Kq-Ea1" userLabel="First Responder" sceneMemberID="firstResponder"/>
             </objects>
-            <point key="canvasLocation" x="52.173913043478265" y="375"/>
+            <point key="canvasLocation" x="52" y="374.66266866566718"/>
         </scene>
     </scenes>
     <resources>
+        <image name="logo 2.jpeg" width="792" height="1408"/>
         <systemColor name="systemBackgroundColor">
             <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
         </systemColor>

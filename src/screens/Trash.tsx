@@ -17,7 +17,12 @@ const { width } = Dimensions.get('window');
 const itemWidth = (width - 48) / 2; // 2 columns with padding
 
 const Trash: React.FC = () => {
-  const { trashedItems, restoreFromTrash, deleteFromTrash } = useMedia();
+  const {
+    trashedItems,
+    restoreFromTrash,
+    deleteFromTrash,
+    deleteBatchFromTrash,
+  } = useMedia();
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
 
@@ -48,7 +53,7 @@ const Trash: React.FC = () => {
   const showItemActions = (item: MediaItem) => {
     Alert.alert(
       'Item Actions',
-      `What would you like to do with ${item.filename}?`,
+      `What would you like to do with ${item.filename}?\n\nNote: iOS will ask for confirmation when deleting.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -58,7 +63,17 @@ const Trash: React.FC = () => {
         },
         {
           text: 'Delete Permanently',
-          onPress: () => confirmDelete([item]),
+          onPress: async () => {
+            try {
+              await deleteFromTrash(item);
+            } catch (error) {
+              Alert.alert(
+                'Deletion Complete',
+                'Item has been removed from the app. It may still exist in your device gallery if deletion was not permitted.',
+                [{ text: 'OK' }],
+              );
+            }
+          },
           style: 'destructive',
         },
       ],
@@ -71,16 +86,27 @@ const Trash: React.FC = () => {
       'Delete Permanently',
       `Are you sure you want to permanently delete ${itemCount} item${
         itemCount > 1 ? 's' : ''
-      }? This action cannot be undone.`,
+      }? This action cannot be undone.\n\nNote: iOS will show one confirmation dialog for all items.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete Permanently',
           style: 'destructive',
-          onPress: () => {
-            items.forEach(item => deleteFromTrash(item));
-            setSelectedItems(new Set());
-            setSelectionMode(false);
+          onPress: async () => {
+            try {
+              await deleteBatchFromTrash(items);
+              setSelectedItems(new Set());
+              setSelectionMode(false);
+            } catch (error) {
+              // Items are removed from trash even if device deletion fails
+              setSelectedItems(new Set());
+              setSelectionMode(false);
+              Alert.alert(
+                'Deletion Complete',
+                'Items have been removed from the app. Some items may still exist in your device gallery if deletion was not permitted.',
+                [{ text: 'OK' }],
+              );
+            }
           },
         },
       ],
@@ -106,16 +132,27 @@ const Trash: React.FC = () => {
   const handleDeleteAll = () => {
     Alert.alert(
       'Delete All Items',
-      `Are you sure you want to permanently delete all ${trashedItems.length} items in trash? This action cannot be undone.`,
+      `Are you sure you want to permanently delete all ${trashedItems.length} items in trash? This action cannot be undone.\n\nNote: iOS will show one confirmation dialog for all items.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete All',
           style: 'destructive',
-          onPress: () => {
-            trashedItems.forEach(item => deleteFromTrash(item));
-            setSelectedItems(new Set());
-            setSelectionMode(false);
+          onPress: async () => {
+            try {
+              await deleteBatchFromTrash(trashedItems);
+              setSelectedItems(new Set());
+              setSelectionMode(false);
+            } catch (error) {
+              // Items are removed from trash even if device deletion fails
+              setSelectedItems(new Set());
+              setSelectionMode(false);
+              Alert.alert(
+                'Deletion Complete',
+                'Items have been removed from the app. Some items may still exist in your device gallery if deletion was not permitted.',
+                [{ text: 'OK' }],
+              );
+            }
           },
         },
       ],

@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  Image,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import { useMedia, MediaItem } from '../context/MediaContext';
@@ -23,6 +24,8 @@ const MonthThumbnail: React.FC<MonthThumbnailProps> = ({
   onPress,
 }) => {
   const { selectedSources } = useMedia();
+  const [imageError, setImageError] = React.useState(false);
+  const [imageLoaded, setImageLoaded] = React.useState(false);
 
   // Filter items based on selected sources
   const filteredItems = React.useMemo(() => {
@@ -40,26 +43,80 @@ const MonthThumbnail: React.FC<MonthThumbnailProps> = ({
 
   const thumbnailItem = filteredItems[0];
 
+  // Reset state when thumbnail item changes
+  React.useEffect(() => {
+    setImageError(false);
+    setImageLoaded(false);
+  }, [thumbnailItem?.uri]);
+
   if (!thumbnailItem || filteredItems.length === 0) {
     return null;
   }
+
+  const handleImageError = () => {
+    setImageError(true);
+  };
+
+  const handleImageLoad = () => {
+    setImageLoaded(true);
+    setImageError(false);
+  };
 
   return (
     <TouchableOpacity
       style={styles.container}
       onPress={() => onPress(monthKey, filteredItems)}
     >
-      <FastImage
-        source={{ uri: thumbnailItem.uri }}
-        style={styles.thumbnail}
-        resizeMode={FastImage.resizeMode.cover}
-      />
-      <View style={styles.overlay}>
-        <Text style={styles.monthText}>{monthName}</Text>
-        <Text style={styles.countText}>{filteredItems.length} items</Text>
+      {/* Try FastImage first, fallback to regular Image if it fails */}
+      {!imageError ? (
+        <FastImage
+          source={{ uri: thumbnailItem.uri }}
+          style={styles.thumbnail}
+          resizeMode={FastImage.resizeMode.cover}
+          onError={handleImageError}
+          onLoad={handleImageLoad}
+        />
+      ) : (
+        <Image
+          source={{ uri: thumbnailItem.uri }}
+          style={styles.thumbnail}
+          resizeMode="cover"
+          onError={handleImageError}
+          onLoad={handleImageLoad}
+        />
+      )}
+
+      {/* Loading indicator */}
+      {!imageLoaded && !imageError && (
+        <View style={styles.loadingContainer}>
+          <View style={styles.loadingContent}>
+            <Text style={styles.loadingText}>Loading...</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Error state */}
+      {imageError && (
+        <View style={styles.errorContainer}>
+          <View style={styles.errorContent}>
+            <Text style={styles.errorIcon}>📸</Text>
+            <Text style={styles.errorText}>Preview unavailable</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Gradient overlay for better readability */}
+      <View style={styles.gradientOverlay} />
+
+      {/* Month banner with sleek background */}
+      <View style={styles.monthBanner}>
+        <View style={styles.monthBannerContent}>
+          <Text style={styles.monthText}>{monthName}</Text>
+          <Text style={styles.countText}>{filteredItems.length} items</Text>
+        </View>
       </View>
 
-      {/* Source indicators */}
+      {/* Source indicators with enhanced styling */}
       <View style={styles.sourcesContainer}>
         {Array.from(new Set(filteredItems.map(item => item.source)))
           .slice(0, 3)
@@ -89,56 +146,131 @@ const styles = StyleSheet.create({
     height: 200,
     marginHorizontal: 16,
     marginVertical: 8,
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: 'hidden',
-    elevation: 4,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    backgroundColor: '#f8f9fa',
   },
   thumbnail: {
     width: '100%',
     height: '100%',
   },
-  overlay: {
+  loadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingContent: {
+    backgroundColor: 'rgba(248, 249, 250, 0.95)',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 12,
+  },
+  loadingText: {
+    color: '#495057',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  errorContainer: {
+    position: 'absolute',
+    bottom: 80,
+    left: 16,
+    right: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorContent: {
+    backgroundColor: 'rgba(248, 249, 250, 0.95)',
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  errorIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+    opacity: 0.7,
+  },
+  errorText: {
+    color: '#6c757d',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  gradientOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    padding: 12,
+    height: 100,
+    backgroundColor: 'transparent',
+    // Creating a gradient effect using multiple overlays
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+  },
+  monthBanner: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(173, 216, 230, 0.9)',
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+  },
+  monthBannerContent: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.4)',
   },
   monthText: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '700',
+    color: '#1a1a1a',
+    fontSize: 20,
+    fontWeight: '800',
     marginBottom: 4,
+    textShadowColor: 'rgba(255, 255, 255, 0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   countText: {
-    color: '#ffffff',
+    color: '#2c2c2c',
     fontSize: 14,
+    fontWeight: '600',
     opacity: 0.9,
+    textShadowColor: 'rgba(255, 255, 255, 0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   sourcesContainer: {
     position: 'absolute',
-    top: 12,
-    right: 12,
+    top: 16,
+    right: 16,
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
   sourceTag: {
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
-    marginLeft: 4,
-    marginBottom: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginLeft: 6,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   sourceText: {
     color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });
 
