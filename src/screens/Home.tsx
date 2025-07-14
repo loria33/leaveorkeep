@@ -13,12 +13,42 @@ import {
   Image,
   Platform,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useMedia, MediaItem } from '../context/MediaContext';
 import MediaViewer from '../components/MediaViewer';
 import { checkMediaPermissionsWithRetry } from '../utils/permissions';
 import { getViewingConfig } from '../constants/app';
 
 const logoImage = require('../assets/logoinApp.png');
+const backgroundImage = require('../assets/log.jpeg');
+
+// Vibrant color palette for month cards
+const monthGradients = [
+  ['#FF4757', '#FF6B7A'], // Bright Red
+  ['#00D2D3', '#00E5E6'], // Bright Turquoise
+  ['#2E86DE', '#4A9EFF'], // Bright Blue
+  ['#10AC84', '#1DD1A1'], // Bright Green
+  ['#FFA502', '#FFB142'], // Bright Orange
+  ['#9C88FF', '#B8A9FF'], // Bright Purple
+  ['#00D2D3', '#00E5E6'], // Bright Cyan
+  ['#FFA502', '#FFB142'], // Bright Yellow
+  ['#9C88FF', '#B8A9FF'], // Bright Lavender
+  ['#2E86DE', '#4A9EFF'], // Bright Sky Blue
+  ['#FF6B6B', '#FF8E8E'], // Bright Coral
+  ['#10AC84', '#1DD1A1'], // Bright Lime
+  ['#FF4757', '#FF6B7A'], // Bright Pink
+  ['#2E86DE', '#4A9EFF'], // Bright Azure
+  ['#FFA502', '#FFB142'], // Bright Gold
+  ['#9C88FF', '#B8A9FF'], // Bright Violet
+  ['#10AC84', '#1DD1A1'], // Bright Emerald
+  ['#FF6B6B', '#FF8E8E'], // Bright Rose
+  ['#00D2D3', '#00E5E6'], // Bright Teal
+  ['#FF4757', '#FF6B7A'], // Bright Magenta
+  ['#FFA502', '#FFB142'], // Bright Amber
+  ['#9C88FF', '#B8A9FF'], // Bright Indigo
+  ['#10AC84', '#1DD1A1'], // Bright Mint
+  ['#FF6B6B', '#FF8E8E'], // Bright Ruby
+];
 
 const Home: React.FC = () => {
   const {
@@ -258,44 +288,64 @@ const Home: React.FC = () => {
           </View>
         </View>
       ) : (
-        <ScrollView
-          style={styles.scrollView}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor="#1a1a1a"
-            />
-          }
-          showsVerticalScrollIndicator={false}
-        >
-          {monthSummaries.map(summary => {
-            const count = summary.totalCount || 0;
+        <View style={styles.scrollViewContainer}>
+          <Image
+            source={backgroundImage}
+            style={styles.backgroundImage}
+            resizeMode="cover"
+          />
+          <ScrollView
+            style={styles.scrollView}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor="#1a1a1a"
+              />
+            }
+            showsVerticalScrollIndicator={false}
+          >
+            {monthSummaries.map((summary, index) => {
+              const count = summary.totalCount || 0;
+              const gradientColors =
+                monthGradients[index % monthGradients.length];
 
-            return (
-              <TouchableOpacity
-                key={summary.monthKey}
-                style={styles.monthCard}
-                onPress={() => handleMonthPress(summary.monthKey)}
-              >
-                <View style={styles.monthCardContent}>
-                  <View style={styles.monthInfo}>
-                    <Text style={styles.monthTitle}>{summary.monthName}</Text>
-                    <Text style={styles.monthCount}>
-                      {count} {count === 1 ? 'item' : 'items'}
-                    </Text>
-                  </View>
+              return (
+                <TouchableOpacity
+                  key={summary.monthKey}
+                  style={styles.monthCard}
+                  onPress={() => handleMonthPress(summary.monthKey)}
+                >
+                  <LinearGradient
+                    colors={gradientColors}
+                    style={styles.monthCardGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                  >
+                    <View style={styles.monthCardContent}>
+                      <View style={styles.monthInfo}>
+                        <View style={styles.monthTitleRow}>
+                          <Text style={styles.monthTitle}>
+                            {summary.monthName}
+                          </Text>
+                          <Text style={styles.monthCount}>
+                            {count} {count === 1 ? 'item' : 'items'}
+                          </Text>
+                        </View>
+                      </View>
 
-                  <View style={styles.monthRight}>
-                    <Text style={styles.monthChevron}>›</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+                      <View style={styles.monthRight}>
+                        <Text style={styles.monthChevron}>›</Text>
+                      </View>
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+              );
+            })}
 
-          <View style={styles.bottomSpacing} />
-        </ScrollView>
+            <View style={styles.bottomSpacing} />
+          </ScrollView>
+        </View>
       )}
 
       {/* Media Viewer Modal */}
@@ -375,23 +425,36 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
+  scrollViewContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  backgroundImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    opacity: 0.3,
+  },
   scrollView: {
     flex: 1,
-    backgroundColor: '#f0f8ff',
+    backgroundColor: 'transparent',
   },
   monthCard: {
     marginHorizontal: 20,
     marginVertical: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(173, 216, 230, 0.3)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+    overflow: 'hidden',
+  },
+  monthCardGradient: {
+    padding: 16,
+    minHeight: 80, // Increased height by 100% (was roughly 40px)
   },
   monthCardContent: {
     flexDirection: 'row',
@@ -401,24 +464,37 @@ const styles = StyleSheet.create({
   monthInfo: {
     flex: 1,
   },
+  monthTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   monthTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 4,
+    color: '#ffffff',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   monthCount: {
     fontSize: 15,
-    color: 'rgba(26, 26, 26, 0.7)',
-    fontWeight: '500',
+    color: '#ffffff',
+    fontWeight: '600',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   monthRight: {
     marginLeft: 16,
   },
   monthChevron: {
     fontSize: 28,
-    color: 'rgba(26, 26, 26, 0.5)',
+    color: '#ffffff',
     fontWeight: '300',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   loadingContainer: {
     flex: 1,
