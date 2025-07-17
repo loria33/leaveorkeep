@@ -52,6 +52,10 @@ export interface MediaContextType {
   monthSummaries: MonthSummary[];
   monthContent: { [monthKey: string]: MonthContent };
 
+  // Duplicate detection
+  duplicateItems: MediaItem[];
+  duplicateGroups: { [filename: string]: MediaItem[] };
+
   // Common state
   trashedItems: MediaItem[];
   isLoading: boolean;
@@ -80,6 +84,9 @@ export interface MediaContextType {
   loadMonthContent: (monthKey: string) => Promise<MediaItem[]>;
   loadMoreMonthContent: (monthKey: string) => Promise<void>;
   getMonthItems: (monthKey: string) => MediaItem[];
+
+  // Duplicate detection methods
+  scanDuplicates: () => Promise<void>;
 
   // Viewing limits
   canViewMedia: () => boolean;
@@ -117,6 +124,12 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   // Cache for native photos for pagination
   const [nativePhotoCache, setNativePhotoCache] = useState<{
     [monthKey: string]: MediaItem[];
+  }>({});
+
+  // Duplicate detection state
+  const [duplicateItems, setDuplicateItems] = useState<MediaItem[]>([]);
+  const [duplicateGroups, setDuplicateGroups] = useState<{
+    [filename: string]: MediaItem[];
   }>({});
 
   // Common state
@@ -620,6 +633,10 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     monthSummaries,
     monthContent,
 
+    // Duplicate detection
+    duplicateItems,
+    duplicateGroups,
+
     // Common
     trashedItems,
     isLoading,
@@ -648,6 +665,49 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     loadMonthContent: loadMonthContentMethod,
     loadMoreMonthContent: loadMoreMonthContentMethod,
     getMonthItems,
+
+    // Duplicate detection methods
+    scanDuplicates: async () => {
+      try {
+        // Try native module first for fast duplicate detection
+        const { fetchAllPhotosNative } = await import('../native/PhotoMonths');
+        const allPhotos = await fetchAllPhotosNative();
+
+        if (allPhotos && allPhotos.length > 0) {
+          // Group photos by composite key: pixelWidth, pixelHeight, timestamp
+          const metaGroups: { [key: string]: MediaItem[] } = {};
+
+          allPhotos.forEach(photo => {
+            // Use 0 as fallback for missing fields
+            const pixelWidth = (photo as any).pixelWidth || 0;
+            const pixelHeight = (photo as any).pixelHeight || 0;
+            const timestamp = (photo as any).timestamp || 0;
+            const key = `${pixelWidth}_${pixelHeight}_${timestamp}`;
+            if (!metaGroups[key]) {
+              metaGroups[key] = [];
+            }
+            metaGroups[key].push(photo);
+          });
+
+          // Find groups with more than one item (duplicates)
+          const duplicateGroups: { [key: string]: MediaItem[] } = {};
+          const allDuplicates: MediaItem[] = [];
+
+          Object.keys(metaGroups).forEach(key => {
+            const group = metaGroups[key];
+            if (group.length > 1) {
+              duplicateGroups[key] = group;
+              allDuplicates.push(...group);
+            }
+          });
+
+          setDuplicateGroups(duplicateGroups);
+          setDuplicateItems(allDuplicates);
+        }
+      } catch (error) {
+        console.log('❌ Error in scanDuplicates:', error);
+      }
+    },
 
     // Viewing limits
     canViewMedia,

@@ -6,6 +6,7 @@ declare global {
   interface NativeModulesStatic {
     PhotoMonths?: {
       fetchMonths: () => Promise<MonthSummary[]>;
+      fetchAllPhotos: () => Promise<MediaItem[]>;
       fetchMonthPhotos: (monthKey: string) => Promise<MediaItem[]>;
     };
   }
@@ -27,6 +28,28 @@ export const fetchMonthsNative = async (): Promise<MonthSummary[] | null> => {
 
     if (Array.isArray(result) && result.length > 0) {
       return result as MonthSummary[];
+    }
+
+    return null;
+  } catch (error) {
+    return null;
+  }
+};
+
+export const fetchAllPhotosNative = async (): Promise<MediaItem[] | null> => {
+  if (!PhotoMonths) {
+    return null;
+  }
+
+  if (typeof PhotoMonths.fetchAllPhotos !== 'function') {
+    return null;
+  }
+
+  try {
+    const result = await PhotoMonths.fetchAllPhotos();
+
+    if (Array.isArray(result)) {
+      return result as MediaItem[];
     }
 
     return null;

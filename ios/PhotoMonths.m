@@ -97,6 +97,56 @@ RCT_REMAP_METHOD(fetchMonths,
   resolve(results);
 }
 
+RCT_REMAP_METHOD(fetchAllPhotos,
+                 resolvee:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject)
+{
+  // Get all photos and videos
+  PHFetchOptions *assetOptions = [[PHFetchOptions alloc] init];
+  assetOptions.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:@"creationDate" ascending:NO]];
+  
+  PHFetchResult<PHAsset *> *allAssets = [PHAsset fetchAssetsWithOptions:assetOptions];
+  
+  NSMutableArray *results = [NSMutableArray array];
+  
+  for (PHAsset *asset in allAssets) {
+    if (asset.creationDate) {
+      // Convert PHAsset to our format
+      NSString *assetURI = [NSString stringWithFormat:@"ph://%@", asset.localIdentifier];
+      NSNumber *pixelWidth = @(asset.pixelWidth);
+      NSNumber *pixelHeight = @(asset.pixelHeight);
+      NSNumber *fileSize = @(0);
+      // Try to get file size (asynchronously, so just set 0 for now)
+      // For future: use PHAssetResource to get file size if needed
+      NSDictionary *photo = @{
+        @"id": asset.localIdentifier,
+        @"uri": assetURI,
+        @"type": asset.mediaType == PHAssetMediaTypeVideo ? @"video" : @"photo",
+        @"timestamp": @([asset.creationDate timeIntervalSince1970] * 1000),
+        @"source": @"Gallery",
+        @"filename": [NSString stringWithFormat:@"photo_%@", asset.localIdentifier],
+        @"pixelWidth": pixelWidth,
+        @"pixelHeight": pixelHeight,
+        @"fileSize": fileSize
+      };
+      
+      [results addObject:photo];
+      
+      // Limit to 2000 photos to avoid memory issues
+      if ([results count] >= 2000) {
+        break;
+      }
+    }
+  }
+  // Log the number of assets and all asset dictionaries
+  NSLog(@"[PhotoMonths] fetchAllPhotos: Found %lu assets", (unsigned long)[results count]);
+  for (NSUInteger i = 0; i < [results count]; i++) {
+    NSLog(@"[PhotoMonths] Asset %lu: %@", (unsigned long)i, results[i]);
+  }
+  
+  resolve(results);
+}
+
 RCT_REMAP_METHOD(fetchMonthPhotos,
                  monthKey:(NSString *)monthKey
                  resolver:(RCTPromiseResolveBlock)resolve

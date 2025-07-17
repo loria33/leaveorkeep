@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,8 +10,11 @@ import {
   Alert,
   ScrollView,
   Linking,
+  Image,
+  Animated,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { useMedia } from '../context/MediaContext';
 import {
   requestMediaPermissions,
@@ -87,6 +90,13 @@ const onboardingSteps = [
     icon: '📋',
   },
   {
+    type: 'interactive_swipe',
+    title: 'Learn the Gestures',
+    subtitle: 'Try the swipe gestures',
+    description: 'Swipe left, then right, then up to continue',
+    image: require('../assets/logoinApp.png'),
+  },
+  {
     title: 'Ready to Start? 🚀',
     subtitle: 'We need permission to access your photos',
     description:
@@ -143,10 +153,33 @@ Last Updated: ${new Date().toLocaleDateString()}
 For questions regarding this agreement, please discontinue use of the application.
 `;
 
+const LOGO_IMAGE = require('../assets/logoinApp.png');
+
 const Onboarding: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
+  const [swipeProgress, setSwipeProgress] = useState({
+    left: false,
+    right: false,
+    up: false,
+  });
+  const [currentSwipePhase, setCurrentSwipePhase] = useState<
+    'left' | 'right' | 'up'
+  >('left');
+
+  // Animated values for image movement
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const imageOpacity = useRef(new Animated.Value(1)).current;
+
+  // For interactive swipe step
+  const [swipePhase, setSwipePhase] = useState<'right' | 'left' | 'up'>(
+    'right',
+  );
+  const [logoVisible, setLogoVisible] = useState(true);
+  const logoOpacity = useRef(new Animated.Value(1)).current;
+
   const { setHasPermission, setOnboardingComplete, scanMedia } = useMedia();
 
   const handleNext = () => {
@@ -157,8 +190,105 @@ const Onboarding: React.FC = () => {
         // Privacy step
         setHasScrolledToBottom(false);
       }
+      // Reset swipe progress when moving to interactive step
+      if (currentStep === 4) {
+        // Interactive swipe step
+        setSwipeProgress({ left: false, right: false, up: false });
+        setCurrentSwipePhase('left');
+        translateX.setValue(0);
+        translateY.setValue(0);
+        imageOpacity.setValue(1);
+      }
     } else {
       handlePermissionRequest();
+    }
+  };
+
+  // Helper to go to next swipe phase or onboarding step
+  const goToNextSwipePhase = () => {
+    if (swipePhase === 'right') {
+      setSwipePhase('left');
+      setLogoVisible(true);
+      logoOpacity.setValue(1);
+    } else if (swipePhase === 'left') {
+      setSwipePhase('up');
+      setLogoVisible(true);
+      logoOpacity.setValue(1);
+    } else {
+      // Finished all phases, go to next onboarding step
+      setCurrentStep(currentStep + 1);
+      setSwipePhase('right');
+      setLogoVisible(true);
+      logoOpacity.setValue(1);
+    }
+  };
+
+  // Helper to go to previous swipe phase or onboarding step
+  const goToPrevSwipePhase = () => {
+    if (swipePhase === 'left') {
+      setSwipePhase('right');
+      setLogoVisible(true);
+      logoOpacity.setValue(1);
+    } else if (swipePhase === 'up') {
+      setSwipePhase('left');
+      setLogoVisible(true);
+      logoOpacity.setValue(1);
+    } else {
+      // Go to previous onboarding step
+      setCurrentStep(currentStep - 1);
+      setSwipePhase('right');
+      setLogoVisible(true);
+      logoOpacity.setValue(1);
+    }
+  };
+
+  // Handler for skip button
+  const handleSkipSwipe = () => {
+    setCurrentStep(currentStep + 1);
+    setSwipePhase('right');
+    setLogoVisible(true);
+    logoOpacity.setValue(1);
+  };
+
+  // Handler for swipe gesture
+  const handleSwipeGesture = (event: any) => {
+    if (currentStep !== 4 || !logoVisible) return;
+    if (event.nativeEvent.state !== State.END) return;
+    const { translationX, translationY, velocityX, velocityY } =
+      event.nativeEvent;
+    if (swipePhase === 'right') {
+      if (translationX > 100 || velocityX > 1000) {
+        Animated.timing(logoOpacity, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }).start(() => {
+          setLogoVisible(false);
+          setTimeout(goToNextSwipePhase, 200);
+        });
+      }
+    } else if (swipePhase === 'left') {
+      if (translationX < -100 || velocityX < -1000) {
+        Animated.timing(logoOpacity, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }).start(() => {
+          setLogoVisible(false);
+          setTimeout(goToNextSwipePhase, 200);
+        });
+      }
+    } else if (swipePhase === 'up') {
+      if (translationY < -100 || velocityY < -1000) {
+        Animated.timing(logoOpacity, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }).start(() => {
+          setLogoVisible(false);
+          setTimeout(goToNextSwipePhase, 200);
+        });
+      }
     }
   };
 
@@ -321,6 +451,85 @@ const Onboarding: React.FC = () => {
     );
   }
 
+  // Render interactive swipe step
+  if (currentStep === 4) {
+    // Labels and icons for each phase
+    const phaseLabel =
+      swipePhase === 'right'
+        ? 'Swipe Right'
+        : swipePhase === 'left'
+        ? 'Swipe Left'
+        : 'Swipe Up';
+    const phaseArrow =
+      swipePhase === 'right' ? '➡️' : swipePhase === 'left' ? '⬅️' : '⬆️';
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
+          <PanGestureHandler onHandlerStateChange={handleSwipeGesture}>
+            <View style={styles.interactiveContainer}>
+              {/* Progress Indicator */}
+              <View style={styles.progressContainer}>
+                {onboardingSteps.map((_, index) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.progressDot,
+                      index <= currentStep && styles.activeProgressDot,
+                    ]}
+                  />
+                ))}
+              </View>
+              {/* Content */}
+              <View style={styles.contentContainer}>
+                <View style={styles.interactiveArea}>
+                  {/* Trash can only in up phase */}
+                  {swipePhase === 'up' && (
+                    <View style={styles.trashContainer}>
+                      <Text style={styles.trashIcon}>🗑️</Text>
+                    </View>
+                  )}
+                  {/* Animated logo image */}
+                  {logoVisible && (
+                    <Animated.View
+                      style={[styles.animatedImage, { opacity: logoOpacity }]}
+                    >
+                      <Image
+                        source={LOGO_IMAGE}
+                        style={styles.onboardingImage}
+                        resizeMode="contain"
+                      />
+                    </Animated.View>
+                  )}
+                  {/* Arrow and label */}
+                  <View style={styles.arrowLabelContainer}>
+                    <Text style={styles.arrowText}>{phaseArrow}</Text>
+                    <Text style={styles.arrowLabelBig}>{phaseLabel}</Text>
+                  </View>
+                </View>
+              </View>
+              {/* Bottom Actions */}
+              <View style={styles.bottomContainer}>
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={goToPrevSwipePhase}
+                >
+                  <Text style={styles.backButtonText}>Back</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.nextButton}
+                  onPress={handleSkipSwipe}
+                >
+                  <Text style={styles.nextButtonText}>Skip</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </PanGestureHandler>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -374,7 +583,7 @@ const Onboarding: React.FC = () => {
                 {isRequestingPermission
                   ? 'Requesting...'
                   : currentStep === onboardingSteps.length - 1
-                  ? 'Grant Permission'
+                  ? 'Continue'
                   : 'Next'}
               </Text>
             </TouchableOpacity>
@@ -522,6 +731,124 @@ const styles = StyleSheet.create({
   },
   disabledButtonText: {
     color: 'rgba(255, 255, 255, 0.6)',
+  },
+  // Interactive swipe step styles
+  interactiveContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: responsiveValues.topPadding,
+    paddingBottom: responsiveValues.bottomPadding,
+  },
+  onboardingImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+  },
+  swipeInstructions: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  swipeProgress: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 20,
+    width: '100%',
+  },
+  swipeStep: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  completedSwipe: {
+    backgroundColor: 'rgba(76, 175, 80, 0.3)',
+    borderColor: '#4CAF50',
+    borderWidth: 1,
+  },
+  swipeStepText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  checkmark: {
+    color: '#4CAF50',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  completedButton: {
+    backgroundColor: '#4CAF50',
+  },
+  interactiveArea: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginTop: 40,
+  },
+  trashContainer: {
+    width: width * 0.1,
+    height: width * 0.1,
+    borderRadius: width * 0.05,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  trashIcon: {
+    fontSize: width * 0.05,
+  },
+  swipeArea: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    width: '100%',
+    position: 'relative',
+  },
+  animatedImage: {
+    width: width * 0.7,
+    height: height * 0.35,
+    borderRadius: 24,
+    backgroundColor: '#fff',
+    alignSelf: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
+  leftArrow: {
+    alignItems: 'center',
+  },
+  rightArrow: {
+    alignItems: 'center',
+  },
+  upArrow: {
+    alignItems: 'center',
+  },
+  arrowText: {
+    fontSize: width * 0.1,
+    color: '#ffffff',
+    fontWeight: 'bold',
+  },
+  arrowLabel: {
+    fontSize: responsiveValues.subtitleSize - 2,
+    color: '#ffffff',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  arrowLabelContainer: {
+    position: 'absolute',
+    bottom: -height * 0.15, // Position below the swipe area
+    alignItems: 'center',
+  },
+  arrowLabelBig: {
+    fontSize: responsiveValues.subtitleSize + 2,
+    color: '#ffffff',
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
 

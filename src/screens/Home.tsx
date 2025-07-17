@@ -20,7 +20,6 @@ import { checkMediaPermissionsWithRetry } from '../utils/permissions';
 import { getViewingConfig } from '../constants/app';
 
 const logoImage = require('../assets/logoinApp.png');
-const backgroundImage = require('../assets/log.jpeg');
 
 // Vibrant color palette for month cards
 const monthGradients = [
@@ -54,11 +53,14 @@ const Home: React.FC = () => {
   const {
     monthSummaries,
     monthContent,
+    duplicateItems,
+    duplicateGroups,
     isLoading,
     scanProgress,
     hasPermission,
     setHasPermission,
     scanMonthSummaries,
+    scanDuplicates,
     loadMonthContent,
     loadMoreMonthContent,
     getMonthItems,
@@ -74,7 +76,7 @@ const Home: React.FC = () => {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await scanMonthSummaries();
+    await Promise.all([scanMonthSummaries(), scanDuplicates()]);
     setRefreshing(false);
   };
 
@@ -121,6 +123,14 @@ const Home: React.FC = () => {
     }
   };
 
+  const handleDuplicatesPress = () => {
+    if (duplicateItems.length > 0) {
+      setViewerItems(duplicateItems);
+      setViewerInitialIndex(0);
+      setViewerVisible(true);
+    }
+  };
+
   const handleCloseViewer = () => {
     setViewerVisible(false);
     setViewerItems([]);
@@ -131,7 +141,7 @@ const Home: React.FC = () => {
       const hasPermission = await checkMediaPermissionsWithRetry();
       if (hasPermission) {
         setHasPermission(true);
-        await scanMonthSummaries();
+        await Promise.all([scanMonthSummaries(), scanDuplicates()]);
       } else {
         Alert.alert(
           'Permission Required',
@@ -159,7 +169,7 @@ const Home: React.FC = () => {
 
   useEffect(() => {
     if (hasPermission && monthSummaries.length === 0) {
-      scanMonthSummaries();
+      Promise.all([scanMonthSummaries(), scanDuplicates()]);
     }
   }, [hasPermission]);
 
@@ -289,11 +299,6 @@ const Home: React.FC = () => {
         </View>
       ) : (
         <View style={styles.scrollViewContainer}>
-          <Image
-            source={backgroundImage}
-            style={styles.backgroundImage}
-            resizeMode="cover"
-          />
           <ScrollView
             style={styles.scrollView}
             refreshControl={
@@ -305,6 +310,45 @@ const Home: React.FC = () => {
             }
             showsVerticalScrollIndicator={false}
           >
+            {/* Duplicate Images Card */}
+            <TouchableOpacity
+              style={styles.duplicateCard}
+              onPress={handleDuplicatesPress}
+              disabled={duplicateItems.length === 0}
+            >
+              <LinearGradient
+                colors={['#FF6B6B', '#FF8E8E']}
+                style={styles.duplicateCardGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <View style={styles.duplicateCardContent}>
+                  <View style={styles.duplicateInfo}>
+                    <View style={styles.duplicateTitleRow}>
+                      <Text style={styles.duplicateTitle}>
+                        🔍 Duplicate Images
+                      </Text>
+                      <Text style={styles.duplicateCount}>
+                        {duplicateItems.length > 0
+                          ? `${duplicateItems.length} duplicates`
+                          : 'No duplicates found'}
+                      </Text>
+                    </View>
+                    <Text style={styles.duplicateSubtext}>
+                      {duplicateItems.length > 0
+                        ? `${
+                            Object.keys(duplicateGroups).length
+                          } unique filenames`
+                        : ''}
+                    </Text>
+                  </View>
+                  <View style={styles.duplicateRight}>
+                    <Text style={styles.duplicateChevron}>›</Text>
+                  </View>
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+
             {monthSummaries.map((summary, index) => {
               const count = summary.totalCount || 0;
               const gradientColors =
@@ -363,12 +407,12 @@ const Home: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0f8ff',
+    backgroundColor: '#fefefe',
   },
   headerContainer: {
-    backgroundColor: 'rgba(173, 216, 230, 0.3)',
+    backgroundColor: 'rgba(255, 250, 240, 0.8)',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(173, 216, 230, 0.5)',
+    borderBottomColor: 'rgba(245, 245, 220, 0.6)',
   },
   header: {
     paddingHorizontal: 20,
@@ -396,13 +440,13 @@ const styles = StyleSheet.create({
     marginLeft: 16,
   },
   refreshButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 10,
     marginRight: 12,
     borderWidth: 1,
-    borderColor: 'rgba(173, 216, 230, 0.8)',
+    borderColor: 'rgba(245, 245, 220, 0.8)',
   },
   refreshButtonText: {
     fontSize: 16,
@@ -410,12 +454,12 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
   },
   viewingLimitsBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(173, 216, 230, 0.8)',
+    borderColor: 'rgba(245, 245, 220, 0.8)',
   },
   viewingLimitsText: {
     fontSize: 14,
@@ -428,14 +472,6 @@ const styles = StyleSheet.create({
   scrollViewContainer: {
     flex: 1,
     position: 'relative',
-  },
-  backgroundImage: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    opacity: 0.3,
   },
   scrollView: {
     flex: 1,
@@ -501,16 +537,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
-    backgroundColor: '#f0f8ff',
+    backgroundColor: '#fefefe',
   },
   loadingContent: {
-    backgroundColor: 'rgba(173, 216, 230, 0.4)',
+    backgroundColor: 'rgba(255, 250, 240, 0.8)',
     paddingHorizontal: 32,
     paddingVertical: 24,
     borderRadius: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(173, 216, 230, 0.6)',
+    borderColor: 'rgba(245, 245, 220, 0.8)',
   },
   loadingText: {
     fontSize: 16,
@@ -524,16 +560,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
-    backgroundColor: '#f0f8ff',
+    backgroundColor: '#fefefe',
   },
   emptyContent: {
-    backgroundColor: 'rgba(173, 216, 230, 0.4)',
+    backgroundColor: 'rgba(255, 250, 240, 0.8)',
     paddingHorizontal: 32,
     paddingVertical: 32,
     borderRadius: 20,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(173, 216, 230, 0.6)',
+    borderColor: 'rgba(245, 245, 220, 0.8)',
   },
   emptyIcon: {
     fontSize: 64,
@@ -561,16 +597,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
-    backgroundColor: '#f0f8ff',
+    backgroundColor: '#fefefe',
   },
   permissionContent: {
-    backgroundColor: 'rgba(173, 216, 230, 0.4)',
+    backgroundColor: 'rgba(255, 250, 240, 0.8)',
     paddingHorizontal: 32,
     paddingVertical: 32,
     borderRadius: 20,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(173, 216, 230, 0.6)',
+    borderColor: 'rgba(245, 245, 220, 0.8)',
   },
   permissionIcon: {
     fontSize: 64,
@@ -601,13 +637,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   retryButton: {
-    backgroundColor: 'rgba(173, 216, 230, 0.8)',
+    backgroundColor: 'rgba(245, 245, 220, 0.8)',
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 10,
     marginTop: 20,
     borderWidth: 1,
-    borderColor: 'rgba(173, 216, 230, 1)',
+    borderColor: 'rgba(245, 245, 220, 1)',
   },
   retryButtonText: {
     fontSize: 16,
@@ -631,19 +667,82 @@ const styles = StyleSheet.create({
   progressBar: {
     width: '100%',
     height: 8,
-    backgroundColor: 'rgba(173, 216, 230, 0.3)',
+    backgroundColor: 'rgba(245, 245, 220, 0.3)',
     borderRadius: 4,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: 'rgba(173, 216, 230, 0.8)',
+    backgroundColor: 'rgba(245, 245, 220, 0.8)',
     borderRadius: 4,
   },
   progressCounter: {
     fontSize: 14,
     color: 'rgba(26, 26, 26, 0.7)',
     marginTop: 8,
+  },
+  duplicateCard: {
+    marginHorizontal: 20,
+    marginVertical: 6,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+    overflow: 'hidden',
+  },
+  duplicateCardGradient: {
+    padding: 16,
+    minHeight: 80, // Increased height by 100% (was roughly 40px)
+  },
+  duplicateCardContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  duplicateInfo: {
+    flex: 1,
+  },
+  duplicateTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  duplicateTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#ffffff',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  duplicateCount: {
+    fontSize: 15,
+    color: '#ffffff',
+    fontWeight: '600',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  duplicateSubtext: {
+    fontSize: 14,
+    color: '#ffffff',
+    marginTop: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  duplicateRight: {
+    marginLeft: 16,
+  },
+  duplicateChevron: {
+    fontSize: 28,
+    color: '#ffffff',
+    fontWeight: '300',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });
 
