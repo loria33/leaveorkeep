@@ -23,6 +23,7 @@ interface MediaViewerProps {
   items: MediaItem[];
   initialIndex: number;
   onClose: () => void;
+  onViewProgress?: (viewedCount: number) => void;
 }
 
 const { width, height } = Dimensions.get('window');
@@ -31,11 +32,17 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   items,
   initialIndex,
   onClose,
+  onViewProgress,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [showControls, setShowControls] = useState(true);
   const [remainingTime, setRemainingTime] = useState('');
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showOnlyOneMessage, setShowOnlyOneMessage] = useState(false);
+  const [viewedPhotos, setViewedPhotos] = useState<Set<number>>(
+    new Set([initialIndex]),
+  );
+
   const {
     addToTrash,
     canViewMedia,
@@ -146,6 +153,12 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   }
 
   const smoothNavigate = (direction: 'next' | 'prev') => {
+    console.log('🔄 smoothNavigate called:', {
+      direction,
+      isNavigating,
+      currentIndex,
+      itemsLength: items.length,
+    });
     if (isNavigating) return;
 
     setIsNavigating(true);
@@ -153,9 +166,21 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     const targetIndex =
       direction === 'next' ? currentIndex + 1 : currentIndex - 1;
 
-    // Check bounds
-    if (targetIndex < 0 || targetIndex >= items.length) {
+    // Handle endless loop navigation
+    let finalTargetIndex = targetIndex;
+    if (targetIndex < 0) {
+      // Swipe right on first image -> go to last image
+      finalTargetIndex = items.length - 1;
+    } else if (targetIndex >= items.length) {
+      // Swipe left on last image -> go to first image
+      finalTargetIndex = 0;
+    }
+
+    // Only show "only one" message if there's actually only one image
+    if (items.length === 1) {
       setIsNavigating(false);
+      setShowOnlyOneMessage(true);
+      setTimeout(() => setShowOnlyOneMessage(false), 2000);
       return;
     }
 
@@ -186,8 +211,10 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       }),
     ]).start(() => {
       // Update the index
-      setCurrentIndex(targetIndex);
-      incrementViewCount();
+      setCurrentIndex(finalTargetIndex);
+
+      // Track viewed photo
+      setViewedPhotos(prev => new Set([...prev, finalTargetIndex]));
 
       // Reset animations for new item
       translateX.setValue(0);
@@ -202,6 +229,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       // Also reset navigation state immediately if no ad is shown
       // This ensures we can swipe again even without ads
       setTimeout(() => {
+        console.log('✅ Resetting navigation state');
         setIsNavigating(false);
       }, 100);
     });
@@ -396,12 +424,38 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         <Animated.View style={styles.gestureOverlay} />
       </PanGestureHandler>
 
+      {/* Only One Image Message */}
+      {showOnlyOneMessage && (
+        <View style={styles.onlyOneMessageContainer}>
+          <Text style={styles.onlyOneMessageText}>
+            ONLY ONE - where you swiping to?
+          </Text>
+        </View>
+      )}
+
       {/* Floating Controls */}
       {showControls && (
         <View style={styles.controlsOverlay}>
           {/* Top Controls */}
           <View style={styles.topControls}>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+            <TouchableOpacity
+              onPress={() => {
+                console.log(
+                  '🔍 Close button pressed, viewed photos:',
+                  Array.from(viewedPhotos),
+                );
+                // Call progress callback with number of viewed photos
+                if (onViewProgress) {
+                  console.log(
+                    '📞 Calling onViewProgress with:',
+                    viewedPhotos.size,
+                  );
+                  onViewProgress(viewedPhotos.size);
+                }
+                onClose();
+              }}
+              style={styles.closeButton}
+            >
               <Text style={styles.closeText}>✕</Text>
             </TouchableOpacity>
             <View style={styles.counterContainer}>
@@ -426,9 +480,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
 
           {/* Gesture Instructions */}
           <View style={styles.instructionsContainer}>
-            <Text style={styles.instructionText}>
-              ← → Navigate • ↑ Trash • Tap to hide controls
-            </Text>
+            <Text style={styles.instructionText}>← → Navigate • ↑ Trash</Text>
             <Text style={styles.instructionSubText}>
               Ad every 5 swipes • Closes automatically to next item
             </Text>
@@ -682,6 +734,26 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  onlyOneMessageContainer: {
+    position: 'absolute',
+    top: '50%',
+    left: 20,
+    right: 20,
+    transform: [{ translateY: -25 }],
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1001,
+  },
+  onlyOneMessageText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
     textAlign: 'center',
   },
 });

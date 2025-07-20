@@ -66,6 +66,15 @@ export interface MediaContextType {
   viewingLimits: ViewingLimits;
   isPremiumUser: boolean;
 
+  // Month tracking
+  viewedMonths: { [monthKey: string]: boolean };
+  individualMonthProgress: { [monthKey: string]: number };
+  monthProgress: {
+    totalMonths: number;
+    viewedMonths: number;
+    percentage: number;
+  };
+
   // Actions
   setMediaItems: (items: MediaItem[]) => void;
   addToTrash: (item: MediaItem) => void;
@@ -95,6 +104,14 @@ export interface MediaContextType {
 
   // Premium user management
   setPremiumStatus: (isPremium: boolean) => Promise<void>;
+
+  // Month tracking methods
+  markMonthAsViewed: (monthKey: string, viewedCount?: number) => void;
+  getMonthProgress: () => {
+    totalMonths: number;
+    viewedMonths: number;
+    percentage: number;
+  };
 }
 
 const MediaContext = createContext<MediaContextType | undefined>(undefined);
@@ -147,6 +164,14 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     isBlocked: false,
     remainingViews: getViewingConfig().maxViews,
   });
+
+  // Month tracking state
+  const [viewedMonths, setViewedMonths] = useState<{
+    [monthKey: string]: boolean;
+  }>({});
+  const [individualMonthProgress, setIndividualMonthProgress] = useState<{
+    [monthKey: string]: number;
+  }>({});
 
   // Check and reset viewing limits if cooldown has expired
   useEffect(() => {
@@ -219,12 +244,16 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
         storedPermission,
         storedViewingLimits,
         storedPremiumStatus,
+        storedViewedMonths,
+        storedIndividualMonthProgress,
       ] = await Promise.all([
         AsyncStorage.getItem('trashedItems'),
         AsyncStorage.getItem('onboardingComplete'),
         AsyncStorage.getItem('hasPermission'),
         AsyncStorage.getItem('viewingLimits'),
         AsyncStorage.getItem('isPremiumUser'),
+        AsyncStorage.getItem('viewedMonths'),
+        AsyncStorage.getItem('individualMonthProgress'),
       ]);
 
       if (storedTrash) {
@@ -247,6 +276,14 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
 
       if (storedPremiumStatus) {
         setIsPremiumUser(JSON.parse(storedPremiumStatus));
+      }
+
+      if (storedViewedMonths) {
+        setViewedMonths(JSON.parse(storedViewedMonths));
+      }
+
+      if (storedIndividualMonthProgress) {
+        setIndividualMonthProgress(JSON.parse(storedIndividualMonthProgress));
       }
 
       if (storedViewingLimits) {
@@ -624,6 +661,66 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     }
   };
 
+  // Month tracking methods
+  const markMonthAsViewed = (monthKey: string, viewedCount: number = 1) => {
+    console.log('🎯 markMonthAsViewed called:', { monthKey, viewedCount });
+
+    setViewedMonths(prev => {
+      const updated = { ...prev, [monthKey]: true };
+      console.log('📊 Updated viewedMonths:', updated);
+      // Save to storage
+      AsyncStorage.setItem('viewedMonths', JSON.stringify(updated)).catch(
+        () => {
+          // Error saving viewed months
+        },
+      );
+      return updated;
+    });
+
+    // Calculate actual percentage based on viewed photos
+    const monthItems = getMonthItems(monthKey);
+    const totalItems = monthItems.length;
+    const percentage =
+      totalItems > 0 ? Math.round((viewedCount / totalItems) * 100) : 0;
+    console.log('📈 Progress calculation:', {
+      viewedCount,
+      totalItems,
+      percentage,
+    });
+
+    // Update individual month progress with actual percentage
+    setIndividualMonthProgress(prev => {
+      const updated = { ...prev, [monthKey]: percentage };
+      console.log('💾 Updated individualMonthProgress:', updated);
+      // Save to storage
+      AsyncStorage.setItem(
+        'individualMonthProgress',
+        JSON.stringify(updated),
+      ).catch(() => {
+        // Error saving individual month progress
+      });
+      return updated;
+    });
+  };
+
+  const getMonthProgress = () => {
+    const totalMonths = monthSummaries.length;
+    const viewedMonthsCount = Object.keys(viewedMonths).filter(
+      key => viewedMonths[key],
+    ).length;
+    const percentage =
+      totalMonths > 0 ? Math.round((viewedMonthsCount / totalMonths) * 100) : 0;
+
+    return {
+      totalMonths,
+      viewedMonths: viewedMonthsCount,
+      percentage,
+    };
+  };
+
+  // Calculate month progress
+  const monthProgress = getMonthProgress();
+
   const value: MediaContextType = {
     // Legacy
     mediaItems,
@@ -716,6 +813,13 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
 
     // Premium
     setPremiumStatus,
+
+    // Month tracking
+    viewedMonths,
+    individualMonthProgress,
+    monthProgress,
+    markMonthAsViewed,
+    getMonthProgress,
   };
 
   return (

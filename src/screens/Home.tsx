@@ -67,12 +67,17 @@ const Home: React.FC = () => {
     viewingLimits,
     canViewMedia,
     isPremiumUser,
+    viewedMonths,
+    individualMonthProgress,
+    monthProgress,
+    markMonthAsViewed,
   } = useMedia();
 
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerItems, setViewerItems] = useState<MediaItem[]>([]);
   const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [currentViewingMonth, setCurrentViewingMonth] = useState<string>('');
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -101,6 +106,7 @@ const Home: React.FC = () => {
         setViewerItems(monthItems);
         setViewerInitialIndex(0);
         setViewerVisible(true);
+        setCurrentViewingMonth(monthKey);
       }
     } else {
       // Load month content first
@@ -111,6 +117,7 @@ const Home: React.FC = () => {
           setViewerItems(monthItems);
           setViewerInitialIndex(0);
           setViewerVisible(true);
+          setCurrentViewingMonth(monthKey);
         } else {
           Alert.alert(
             'No Photos',
@@ -134,6 +141,23 @@ const Home: React.FC = () => {
   const handleCloseViewer = () => {
     setViewerVisible(false);
     setViewerItems([]);
+    setCurrentViewingMonth('');
+  };
+
+  const handleViewProgress = (viewedCount: number) => {
+    console.log('🔍 handleViewProgress called with:', {
+      viewedCount,
+      currentViewingMonth,
+    });
+    if (currentViewingMonth) {
+      console.log(
+        '📝 Marking month as viewed:',
+        currentViewingMonth,
+        'with count:',
+        viewedCount,
+      );
+      markMonthAsViewed(currentViewingMonth, viewedCount);
+    }
   };
 
   const handleRetryPermissions = async () => {
@@ -222,12 +246,14 @@ const Home: React.FC = () => {
     }
 
     return (
-      <View style={styles.progressContainer}>
-        <Text style={styles.progressText}>{phaseText}</Text>
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${percentage}%` }]} />
+      <View style={styles.scanProgressContainer}>
+        <Text style={styles.scanProgressText}>{phaseText}</Text>
+        <View style={styles.scanProgressBar}>
+          <View
+            style={[styles.scanProgressFill, { width: `${percentage}%` }]}
+          />
         </View>
-        <Text style={styles.progressCounter}>
+        <Text style={styles.scanProgressCounter}>
           {current} / {total} ({percentage}%)
         </Text>
       </View>
@@ -374,6 +400,15 @@ const Home: React.FC = () => {
                           </Text>
                           <Text style={styles.monthCount}>
                             {count} {count === 1 ? 'item' : 'items'}
+                            {viewedMonths[summary.monthKey] && (
+                              <Text style={styles.monthProgressText}>
+                                {' '}
+                                • Viewed ✓{' '}
+                                {individualMonthProgress[summary.monthKey] ||
+                                  100}
+                                %
+                              </Text>
+                            )}
                           </Text>
                         </View>
                       </View>
@@ -398,6 +433,7 @@ const Home: React.FC = () => {
           items={viewerItems}
           initialIndex={viewerInitialIndex}
           onClose={handleCloseViewer}
+          onViewProgress={handleViewProgress}
         />
       )}
     </SafeAreaView>
@@ -532,6 +568,17 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
+  monthProgressContainer: {
+    marginTop: 4,
+  },
+  monthProgressText: {
+    fontSize: 12,
+    color: '#ffffff',
+    fontWeight: '600',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -653,30 +700,31 @@ const styles = StyleSheet.create({
   bottomSpacing: {
     height: 32,
   },
-  progressContainer: {
+
+  scanProgressContainer: {
     paddingHorizontal: 20,
     paddingVertical: 10,
     alignItems: 'center',
   },
-  progressText: {
+  scanProgressText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1a1a1a',
     marginBottom: 8,
   },
-  progressBar: {
+  scanProgressBar: {
     width: '100%',
     height: 8,
     backgroundColor: 'rgba(245, 245, 220, 0.3)',
     borderRadius: 4,
     overflow: 'hidden',
   },
-  progressFill: {
+  scanProgressFill: {
     height: '100%',
     backgroundColor: 'rgba(245, 245, 220, 0.8)',
     borderRadius: 4,
   },
-  progressCounter: {
+  scanProgressCounter: {
     fontSize: 14,
     color: 'rgba(26, 26, 26, 0.7)',
     marginTop: 8,

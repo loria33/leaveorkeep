@@ -8,6 +8,7 @@ import {
   Image,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
+import LinearGradient from 'react-native-linear-gradient';
 import { useMedia, MediaItem } from '../context/MediaContext';
 
 interface MonthThumbnailProps {
@@ -105,16 +106,17 @@ const MonthThumbnail: React.FC<MonthThumbnailProps> = ({
         </View>
       )}
 
-      {/* Gradient overlay for better readability */}
-      <View style={styles.gradientOverlay} />
-
-      {/* Month banner with sleek background */}
-      <View style={styles.monthBanner}>
+      {/* Gradient overlay with month info */}
+      <LinearGradient
+        colors={['transparent', 'rgba(173, 216, 230, 0.9)']}
+        style={styles.gradientOverlay}
+        locations={[0, 0.7]}
+      >
         <View style={styles.monthBannerContent}>
           <Text style={styles.monthText}>{monthName}</Text>
           <Text style={styles.countText}>{filteredItems.length} items</Text>
         </View>
-      </View>
+      </LinearGradient>
 
       {/* Source indicators with enhanced styling */}
       <View style={styles.sourcesContainer}>
@@ -143,10 +145,10 @@ const MonthThumbnail: React.FC<MonthThumbnailProps> = ({
 const styles = StyleSheet.create({
   container: {
     width: width - 32,
-    height: 200,
+    height: 240,
     marginHorizontal: 16,
     marginVertical: 8,
-    borderRadius: 16,
+    borderRadius: 24,
     overflow: 'hidden',
     elevation: 8,
     shadowColor: '#000',
@@ -210,19 +212,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 100,
-    backgroundColor: 'transparent',
-    // Creating a gradient effect using multiple overlays
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
-  },
-  monthBanner: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(173, 216, 230, 0.9)',
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    justifyContent: 'flex-end',
   },
   monthBannerContent: {
     padding: 16,
