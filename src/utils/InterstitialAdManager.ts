@@ -27,7 +27,9 @@ class InterstitialAdManager {
   private onAdClosedCallback: (() => void) | null = null;
 
   // Automatically use test ID in development, production ID in release
-  private readonly AD_UNIT_ID = 'ca-app-pub-5483809755530109/2090268216'; // Production Ad Unit ID
+  private readonly AD_UNIT_ID = __DEV__
+    ? TestIds.INTERSTITIAL
+    : 'ca-app-pub-5483809755530109/2090268216';
 
   private constructor() {
     this.initializeAd();

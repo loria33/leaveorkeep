@@ -15,7 +15,17 @@ export interface MonthSummary {
   month: number;
   monthName: string;
   totalCount: number;
+  photoCount: number;
+  videoCount: number;
   hasMore: boolean;
+}
+
+export interface MonthSelectionData {
+  monthKey: string;
+  monthName: string;
+  photoCount: number;
+  videoCount: number;
+  totalCount: number;
 }
 
 export interface MonthScanOptions {
@@ -119,9 +129,6 @@ export const scanMonthSummariesFS = async (
 
     // If no files found via filesystem, fall back to Camera Roll immediately
     if (!foundAnyFiles || totalFiles === 0) {
-      console.log(
-        '🔄 No files found via filesystem, falling back to Camera Roll',
-      );
       throw new Error('No filesystem access to photos');
     }
 
@@ -179,6 +186,8 @@ export const scanMonthSummariesFS = async (
           month: parseInt(month),
           monthName: getMonthName(monthKey),
           totalCount: 0, // Placeholder, will be updated by loadNextPhotoForMonth
+          photoCount: 0, // Placeholder, will be updated by native module
+          videoCount: 0, // Placeholder, will be updated by native module
           hasMore: true,
         });
       } catch (error) {
@@ -194,10 +203,6 @@ export const scanMonthSummariesFS = async (
     onProgress?.({ current: 100, total: 100, phase: 'complete' });
     return summaries;
   } catch (error) {
-    console.log(
-      '🔄 Filesystem scanning failed, falling back to Camera Roll:',
-      error,
-    );
     // Fall back to Camera Roll if filesystem access fails
     return await scanMonthSummaries(options);
   }
@@ -250,7 +255,6 @@ export const scanMonthSummaries = async (
   const { maxMonths = 999, onProgress } = options; // Increased default from 12 to 999
 
   try {
-    console.log('📷 Starting Camera Roll month scanning...');
     onProgress?.({ current: 10, total: 100, phase: 'fetching' });
 
     const monthsFound = new Set<string>();
@@ -269,7 +273,6 @@ export const scanMonthSummaries = async (
       const photoData = await getPhotosWithLimit(batchLimit, cursor);
 
       if (photoData.edges.length === 0) {
-        console.log('📷 No more photos found');
         break;
       }
 
@@ -312,6 +315,8 @@ export const scanMonthSummaries = async (
           month: parseInt(month),
           monthName: getMonthName(monthKey),
           totalCount: 0, // Placeholder, will be updated by loadNextPhotoForMonth
+          photoCount: 0, // Placeholder, will be updated by native module
+          videoCount: 0, // Placeholder, will be updated by native module
           hasMore: true,
         });
       } catch (error) {
@@ -327,7 +332,6 @@ export const scanMonthSummaries = async (
     onProgress?.({ current: 100, total: 100, phase: 'complete' });
     return summaries;
   } catch (error) {
-    console.log('📷 Camera Roll scanning failed:', error);
     onProgress?.({ current: 0, total: 0, phase: 'complete' });
     return [];
   }

@@ -20,6 +20,7 @@ import {
   requestMediaPermissions,
   checkMediaPermissionsWithRetry,
 } from '../utils/permissions';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
 
@@ -181,6 +182,7 @@ const Onboarding: React.FC = () => {
   const logoOpacity = useRef(new Animated.Value(1)).current;
 
   const { setHasPermission, setOnboardingComplete, scanMedia } = useMedia();
+  const insets = useSafeAreaInsets();
 
   const handleNext = () => {
     if (currentStep < onboardingSteps.length - 1) {
@@ -295,6 +297,7 @@ const Onboarding: React.FC = () => {
   const handlePermissionRequest = async () => {
     setIsRequestingPermission(true);
     try {
+      // Only use react-native-permissions logic
       const hasPermission = await requestMediaPermissions();
 
       if (hasPermission) {
@@ -419,7 +422,12 @@ const Onboarding: React.FC = () => {
             </View>
 
             {/* Bottom Actions */}
-            <View style={styles.bottomContainer}>
+            <View
+              style={[
+                styles.bottomContainer,
+                { paddingBottom: insets.bottom || 16 },
+              ]}
+            >
               <TouchableOpacity
                 style={styles.backButton}
                 onPress={() => setCurrentStep(currentStep - 1)}
@@ -509,7 +517,12 @@ const Onboarding: React.FC = () => {
                 </View>
               </View>
               {/* Bottom Actions */}
-              <View style={styles.bottomContainer}>
+              <View
+                style={[
+                  styles.bottomContainer,
+                  { paddingBottom: insets.bottom || 16 },
+                ]}
+              >
                 <TouchableOpacity
                   style={styles.backButton}
                   onPress={goToPrevSwipePhase}
@@ -561,7 +574,12 @@ const Onboarding: React.FC = () => {
           </View>
 
           {/* Bottom Actions */}
-          <View style={styles.bottomContainer}>
+          <View
+            style={[
+              styles.bottomContainer,
+              { paddingBottom: insets.bottom || 16 },
+            ]}
+          >
             {currentStep > 0 && (
               <TouchableOpacity
                 style={styles.backButton}

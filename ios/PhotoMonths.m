@@ -13,6 +13,8 @@ RCT_REMAP_METHOD(fetchMonths,
   
   NSMutableArray *results = [NSMutableArray array];
   NSMutableDictionary *monthCounts = [NSMutableDictionary dictionary]; // Store counts per month
+  NSMutableDictionary *photoCounts = [NSMutableDictionary dictionary]; // Store photo counts per month
+  NSMutableDictionary *videoCounts = [NSMutableDictionary dictionary]; // Store video counts per month
   NSMutableSet *seenMonths = [NSMutableSet set]; // Avoid duplicates
 
   // First, get all photos and count them by month
@@ -33,6 +35,9 @@ RCT_REMAP_METHOD(fetchMonths,
       
       NSNumber *currentCount = monthCounts[monthKey] ?: @(0);
       monthCounts[monthKey] = @([currentCount integerValue] + 1);
+      
+      NSNumber *currentPhotoCount = photoCounts[monthKey] ?: @(0);
+      photoCounts[monthKey] = @([currentPhotoCount integerValue] + 1);
     }
   }
   
@@ -45,6 +50,9 @@ RCT_REMAP_METHOD(fetchMonths,
       
       NSNumber *currentCount = monthCounts[monthKey] ?: @(0);
       monthCounts[monthKey] = @([currentCount integerValue] + 1);
+      
+      NSNumber *currentVideoCount = videoCounts[monthKey] ?: @(0);
+      videoCounts[monthKey] = @([currentVideoCount integerValue] + 1);
     }
   }
 
@@ -67,12 +75,17 @@ RCT_REMAP_METHOD(fetchMonths,
       NSDate *monthDate = [cal dateFromComponents:components];
       NSString *monthName = [fmt stringFromDate:monthDate];
 
+      NSNumber *photoCount = photoCounts[monthKey] ?: @(0);
+      NSNumber *videoCount = videoCounts[monthKey] ?: @(0);
+      
       NSDictionary *monthData = @{
          @"monthKey": monthKey,
          @"year": @(year),
          @"month": @(month),
          @"monthName": monthName,
          @"totalCount": @(count),
+         @"photoCount": photoCount,
+         @"videoCount": videoCount,
          @"hasMore": @YES
       };
       
@@ -140,15 +153,14 @@ RCT_REMAP_METHOD(fetchAllPhotos,
   }
   // Log the number of assets and all asset dictionaries
   NSLog(@"[PhotoMonths] fetchAllPhotos: Found %lu assets", (unsigned long)[results count]);
-  for (NSUInteger i = 0; i < [results count]; i++) {
-    NSLog(@"[PhotoMonths] Asset %lu: %@", (unsigned long)i, results[i]);
-  }
-  
+ 
   resolve(results);
 }
 
 RCT_REMAP_METHOD(fetchMonthPhotos,
                  monthKey:(NSString *)monthKey
+                 offset:(nonnull NSNumber *)offset
+                 limit:(nonnull NSNumber *)limit
                  resolver:(RCTPromiseResolveBlock)resolve
                  rejecter:(RCTPromiseRejectBlock)reject)
 {
@@ -161,6 +173,8 @@ RCT_REMAP_METHOD(fetchMonthPhotos,
   
   NSInteger targetYear = [parts[0] integerValue];
   NSInteger targetMonth = [parts[1] integerValue];
+  NSInteger offsetValue = [offset integerValue];
+  NSInteger limitValue = [limit integerValue];
   
   // Get all photos and videos
   PHFetchOptions *assetOptions = [[PHFetchOptions alloc] init];
@@ -170,6 +184,7 @@ RCT_REMAP_METHOD(fetchMonthPhotos,
   
   NSMutableArray *results = [NSMutableArray array];
   NSCalendar *cal = [NSCalendar currentCalendar];
+  NSInteger foundCount = 0;
   
   for (PHAsset *asset in allAssets) {
     if (asset.creationDate) {
@@ -177,21 +192,22 @@ RCT_REMAP_METHOD(fetchMonthPhotos,
       NSInteger month = [cal component:NSCalendarUnitMonth fromDate:asset.creationDate];
       
       if (year == targetYear && month == targetMonth) {
-        // Convert PHAsset to our format
-        NSString *assetURI = [NSString stringWithFormat:@"ph://%@", asset.localIdentifier];
-        NSDictionary *photo = @{
-          @"id": asset.localIdentifier,
-          @"uri": assetURI,
-          @"type": asset.mediaType == PHAssetMediaTypeVideo ? @"video" : @"photo",
-          @"timestamp": @([asset.creationDate timeIntervalSince1970] * 1000),
-          @"source": @"Gallery",
-          @"filename": [NSString stringWithFormat:@"photo_%@", asset.localIdentifier]
-        };
-        
-        [results addObject:photo];
-        
-        // Limit to 500 photos to avoid memory issues
-        if ([results count] >= 500) {
+        if (foundCount >= offsetValue && results.count < limitValue) {
+          // Convert PHAsset to our format
+          NSString *assetURI = [NSString stringWithFormat:@"ph://%@", asset.localIdentifier];
+          NSDictionary *photo = @{
+            @"id": asset.localIdentifier,
+            @"uri": assetURI,
+            @"type": asset.mediaType == PHAssetMediaTypeVideo ? @"video" : @"photo",
+            @"timestamp": @([asset.creationDate timeIntervalSince1970] * 1000),
+            @"source": @"Gallery",
+            @"filename": [NSString stringWithFormat:@"photo_%@", asset.localIdentifier]
+          };
+          [results addObject:photo];
+        }
+        foundCount++;
+        // Stop if we've collected enough
+        if (results.count >= limitValue) {
           break;
         }
       }

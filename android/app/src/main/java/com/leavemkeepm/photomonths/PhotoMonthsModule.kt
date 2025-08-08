@@ -5,6 +5,7 @@ import com.facebook.react.bridge.*
 import java.time.Month
 import java.time.format.TextStyle
 import java.util.Locale
+import android.util.Log
 
 class PhotoMonthsModule(private val reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -13,6 +14,7 @@ class PhotoMonthsModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun fetchMonths(promise: Promise) {
+        val startTime = System.currentTimeMillis()
         try {
             val uri = MediaStore.Files.getContentUri("external")
             val projection = arrayOf(
@@ -30,6 +32,9 @@ class PhotoMonthsModule(private val reactContext: ReactApplicationContext) :
                 null,
                 "$groupBy ORDER BY $sortOrder"
             )
+
+            val queryTime = System.currentTimeMillis()
+            Log.d("PhotoMonths", "fetchMonths: Query took ${queryTime - startTime} ms")
 
             val result = Arguments.createArray()
             
@@ -61,7 +66,8 @@ class PhotoMonthsModule(private val reactContext: ReactApplicationContext) :
                     }
                 }
             }
-            
+            val endTime = System.currentTimeMillis()
+            Log.d("PhotoMonths", "fetchMonths: Processing took ${endTime - queryTime} ms, total ${endTime - startTime} ms")
             promise.resolve(result)
         } catch (e: Exception) {
             promise.reject("ERR_MONTH_QUERY", "Failed to fetch months", e)
@@ -70,6 +76,7 @@ class PhotoMonthsModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun fetchAllPhotos(promise: Promise) {
+        val startTime = System.currentTimeMillis()
         try {
             val uri = MediaStore.Files.getContentUri("external")
             val projection = arrayOf(
@@ -91,6 +98,9 @@ class PhotoMonthsModule(private val reactContext: ReactApplicationContext) :
                 sortOrder
             )
             
+            val queryTime = System.currentTimeMillis()
+            Log.d("PhotoMonths", "fetchAllPhotos: Query took ${queryTime - startTime} ms")
+
             val result = Arguments.createArray()
             
             cursor?.use {
@@ -117,7 +127,8 @@ class PhotoMonthsModule(private val reactContext: ReactApplicationContext) :
                     result.pushMap(map)
                 }
             }
-            
+            val endTime = System.currentTimeMillis()
+            Log.d("PhotoMonths", "fetchAllPhotos: Processing took ${endTime - queryTime} ms, total ${endTime - startTime} ms")
             promise.resolve(result)
         } catch (e: Exception) {
             promise.reject("ERR_PHOTO_QUERY", "Failed to fetch all photos", e)
@@ -190,5 +201,4 @@ class PhotoMonthsModule(private val reactContext: ReactApplicationContext) :
             promise.reject("ERR_PHOTO_QUERY", "Failed to fetch photos for month", e)
         }
     }
-} 
 } 

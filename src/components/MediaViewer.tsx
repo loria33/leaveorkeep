@@ -24,6 +24,8 @@ interface MediaViewerProps {
   initialIndex: number;
   onClose: () => void;
   onViewProgress?: (viewedCount: number) => void;
+  monthKey?: string;
+  totalCount: number;
 }
 
 const { width, height } = Dimensions.get('window');
@@ -33,6 +35,8 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   initialIndex,
   onClose,
   onViewProgress,
+  monthKey,
+  totalCount,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [showControls, setShowControls] = useState(true);
@@ -42,6 +46,8 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   const [viewedPhotos, setViewedPhotos] = useState<Set<number>>(
     new Set([initialIndex]),
   );
+  const [videoError, setVideoError] = useState(false);
+  const [videoPaused, setVideoPaused] = useState(false);
 
   const {
     addToTrash,
@@ -49,6 +55,8 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     incrementViewCount,
     viewingLimits,
     getRemainingCooldownTime,
+    loadMoreMonthContent,
+    monthContent,
   } = useMedia();
 
   const translateX = useRef(new Animated.Value(0)).current;
@@ -90,7 +98,29 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     if (canViewMedia()) {
       incrementViewCount();
     }
+    // Reset video error when item changes
+
+    setVideoError(false);
+    setVideoPaused(false);
   }, [currentIndex]);
+
+  // Load more content every 3 swipes when approaching the end
+  React.useEffect(() => {
+    if (!monthKey) return;
+    const current = monthContent[monthKey];
+    if (!current) return;
+
+    // Load 10 more images every 3 swipes if we're within 10 items of the end
+    if (
+      currentIndex > 0 &&
+      currentIndex % 3 === 0 &&
+      currentIndex >= current.items.length - 10 &&
+      current.hasMore &&
+      !current.isLoading
+    ) {
+      loadMoreMonthContent(monthKey, 10);
+    }
+  }, [currentIndex, monthKey, monthContent, loadMoreMonthContent]);
 
   // Check if viewing is blocked
   if (!canViewMedia()) {
@@ -153,12 +183,6 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   }
 
   const smoothNavigate = (direction: 'next' | 'prev') => {
-    console.log('🔄 smoothNavigate called:', {
-      direction,
-      isNavigating,
-      currentIndex,
-      itemsLength: items.length,
-    });
     if (isNavigating) return;
 
     setIsNavigating(true);
@@ -190,6 +214,9 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       return;
     }
 
+    // Update the index immediately to prevent showing previous image
+    setCurrentIndex(finalTargetIndex);
+
     // Animate the transition
     const slideDistance = direction === 'next' ? -width : width;
 
@@ -210,9 +237,6 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         useNativeDriver: true,
       }),
     ]).start(() => {
-      // Update the index
-      setCurrentIndex(finalTargetIndex);
-
       // Track viewed photo
       setViewedPhotos(prev => new Set([...prev, finalTargetIndex]));
 
@@ -229,7 +253,6 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       // Also reset navigation state immediately if no ad is shown
       // This ensures we can swipe again even without ads
       setTimeout(() => {
-        console.log('✅ Resetting navigation state');
         setIsNavigating(false);
       }, 100);
     });
@@ -331,12 +354,20 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       const horizontalThreshold = 80; // Reduced from 100 for more responsive swipes
       const velocityThreshold = 800; // Reduced from 1000 for more responsive swipes
 
-      if (translationX > horizontalThreshold || velocityX > velocityThreshold) {
+      // For videos, require slightly stronger swipes to avoid accidental navigation
+      const videoMultiplier = currentItem?.type === 'video' ? 1.5 : 1;
+      const adjustedHorizontalThreshold = horizontalThreshold * videoMultiplier;
+      const adjustedVelocityThreshold = velocityThreshold * videoMultiplier;
+
+      if (
+        translationX > adjustedHorizontalThreshold ||
+        velocityX > adjustedVelocityThreshold
+      ) {
         // Swipe right - previous image
         handlePrevious();
       } else if (
-        translationX < -horizontalThreshold ||
-        velocityX < -velocityThreshold
+        translationX < -adjustedHorizontalThreshold ||
+        velocityX < -adjustedVelocityThreshold
       ) {
         // Swipe left - next image
         handleNext();
@@ -389,21 +420,41 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
             ]}
           >
             {currentItem.type === 'video' ? (
-              <Video
-                source={{ uri: currentItem.uri }}
-                style={styles.media}
-                resizeMode="contain"
-                controls={showControls}
-                paused={false}
-                onError={error => {
-                  // Video error
-                }}
-              />
+              videoError ? (
+                <View style={styles.videoErrorContainer}>
+                  <Text style={styles.videoErrorIcon}>🎥</Text>
+                  <Text style={styles.videoErrorTitle}>Video Unavailable</Text>
+                  <Text style={styles.videoErrorText}>
+                    This video cannot be played
+                  </Text>
+                </View>
+              ) : (
+                <Video
+                  source={{ uri: currentItem.uri }}
+                  style={styles.media}
+                  resizeMode="contain"
+                  controls={false}
+                  paused={videoPaused}
+                  repeat={false}
+                  playInBackground={false}
+                  playWhenInactive={false}
+                  ignoreSilentSwitch="ignore"
+                  fullscreen={false}
+                  fullscreenAutorotate={true}
+                  fullscreenOrientation="all"
+                  onError={error => {
+                    setVideoError(true);
+                  }}
+                  onLoad={data => {
+                    setVideoError(false);
+                  }}
+                />
+              )
             ) : (
               <Image
                 source={{ uri: currentItem.uri }}
                 style={styles.media}
-                resizeMode="contain"
+                resizeMode="cover"
                 onError={() => {
                   // Image error
                 }}
@@ -416,13 +467,31 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Gesture Handler Overlay */}
+      {/* Gesture Handler Overlay - Enable for all items including videos */}
       <PanGestureHandler
         onGestureEvent={onGestureEvent}
         onHandlerStateChange={onHandlerStateChange}
       >
         <Animated.View style={styles.gestureOverlay} />
       </PanGestureHandler>
+
+      {/* Custom Video Controls */}
+      {currentItem.type === 'video' && showControls && (
+        <View style={styles.videoControlsOverlay}>
+          <TouchableOpacity
+            style={styles.videoControlButton}
+            onPress={() => {
+              const newPausedState = !videoPaused;
+
+              setVideoPaused(newPausedState);
+            }}
+          >
+            <Text style={styles.videoControlIcon}>
+              {videoPaused ? '▶️' : '⏸️'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Only One Image Message */}
       {showOnlyOneMessage && (
@@ -440,16 +509,8 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
           <View style={styles.topControls}>
             <TouchableOpacity
               onPress={() => {
-                console.log(
-                  '🔍 Close button pressed, viewed photos:',
-                  Array.from(viewedPhotos),
-                );
                 // Call progress callback with number of viewed photos
                 if (onViewProgress) {
-                  console.log(
-                    '📞 Calling onViewProgress with:',
-                    viewedPhotos.size,
-                  );
                   onViewProgress(viewedPhotos.size);
                 }
                 onClose();
@@ -458,9 +519,10 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
             >
               <Text style={styles.closeText}>✕</Text>
             </TouchableOpacity>
+            {/* Counter Display */}
             <View style={styles.counterContainer}>
               <Text style={styles.counterText}>
-                {currentIndex + 1} of {items.length}
+                {currentIndex + 1} / {items.length}
               </Text>
               <Text style={styles.remainingText}>
                 {viewingLimits.remainingViews} views left
@@ -481,9 +543,6 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
           {/* Gesture Instructions */}
           <View style={styles.instructionsContainer}>
             <Text style={styles.instructionText}>← → Navigate • ↑ Trash</Text>
-            <Text style={styles.instructionSubText}>
-              Ad every 5 swipes • Closes automatically to next item
-            </Text>
           </View>
         </View>
       )}
@@ -608,7 +667,7 @@ const styles = StyleSheet.create({
   },
   instructionText: {
     color: 'rgba(255, 255, 255, 0.95)',
-    fontSize: 28,
+    fontSize: 33,
     fontWeight: 'bold',
     textAlign: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
@@ -755,6 +814,48 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  videoErrorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+  },
+  videoErrorIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  videoErrorTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  videoErrorText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  videoControlsOverlay: {
+    position: 'absolute',
+    bottom: 100,
+    left: 0,
+    right: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1001,
+  },
+  videoControlButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoControlIcon: {
+    fontSize: 24,
   },
 });
 

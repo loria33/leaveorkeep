@@ -7,7 +7,11 @@ declare global {
     PhotoMonths?: {
       fetchMonths: () => Promise<MonthSummary[]>;
       fetchAllPhotos: () => Promise<MediaItem[]>;
-      fetchMonthPhotos: (monthKey: string) => Promise<MediaItem[]>;
+      fetchMonthPhotos: (
+        monthKey: string,
+        offset: number,
+        limit: number,
+      ) => Promise<MediaItem[]>;
     };
   }
 }
@@ -60,6 +64,8 @@ export const fetchAllPhotosNative = async (): Promise<MediaItem[] | null> => {
 
 export const fetchMonthPhotosNative = async (
   monthKey: string,
+  offset: number = 0,
+  limit: number = 5,
 ): Promise<MediaItem[] | null> => {
   if (!PhotoMonths) {
     return null;
@@ -70,7 +76,7 @@ export const fetchMonthPhotosNative = async (
   }
 
   try {
-    const result = await PhotoMonths.fetchMonthPhotos(monthKey);
+    const result = await PhotoMonths.fetchMonthPhotos(monthKey, offset, limit);
 
     if (Array.isArray(result)) {
       return result as MediaItem[];

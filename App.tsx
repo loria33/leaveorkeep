@@ -8,6 +8,7 @@ import { request, PERMISSIONS, RESULTS } from 'react-native-permissions';
 
 // Context
 import { MediaProvider, useMedia } from './src/context/MediaContext';
+import { AdminProvider } from './src/context/adminContext';
 
 // Screens
 import Onboarding from './src/screens/Onboarding';
@@ -129,11 +130,13 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <MediaProvider>
-      <NavigationContainer>
-        <AppNavigator />
-      </NavigationContainer>
-    </MediaProvider>
+    <AdminProvider>
+      <MediaProvider>
+        <NavigationContainer>
+          <AppNavigator />
+        </NavigationContainer>
+      </MediaProvider>
+    </AdminProvider>
   );
 };
 

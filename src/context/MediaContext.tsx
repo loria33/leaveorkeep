@@ -39,7 +39,7 @@ export interface ViewingLimits {
 export interface MonthContent {
   items: MediaItem[];
   hasMore: boolean;
-  nextCursor?: string;
+  nextOffset?: number;
   isLoading: boolean;
 }
 
@@ -90,8 +90,8 @@ export interface MediaContextType {
 
   // New month-based methods
   scanMonthSummaries: () => Promise<void>;
-  loadMonthContent: (monthKey: string) => Promise<MediaItem[]>;
-  loadMoreMonthContent: (monthKey: string) => Promise<void>;
+  loadMonthContent: (monthKey: string, limit?: number) => Promise<MediaItem[]>;
+  loadMoreMonthContent: (monthKey: string, limit?: number) => Promise<void>;
   getMonthItems: (monthKey: string) => MediaItem[];
 
   // Duplicate detection methods
@@ -392,83 +392,83 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   // Load content for a specific month
   const loadMonthContentMethod = async (
     monthKey: string,
+    limit: number = 5,
   ): Promise<MediaItem[]> => {
-    // Set loading state for this month
     setMonthContent(prev => ({
       ...prev,
       [monthKey]: {
         items: prev[monthKey]?.items || [],
-        hasMore: prev[monthKey]?.hasMore || false,
-        nextCursor: prev[monthKey]?.nextCursor,
+        hasMore: prev[monthKey]?.hasMore ?? true,
+        nextOffset: prev[monthKey]?.nextOffset ?? 0,
         isLoading: true,
       },
     }));
 
     try {
-      // Use native module for fast photo loading
       const { fetchMonthPhotosNative } = await import('../native/PhotoMonths');
-      const nativePhotos = await fetchMonthPhotosNative(monthKey);
-
-      if (nativePhotos && nativePhotos.length > 0) {
-        // Cache all native photos for pagination
-        setNativePhotoCache(prev => ({
-          ...prev,
-          [monthKey]: nativePhotos,
-        }));
-
-        setMonthContent(prev => ({
-          ...prev,
-          [monthKey]: {
-            items: nativePhotos,
-            hasMore: false, // We have all photos from native module
-            nextCursor: undefined,
-            isLoading: false,
-          },
-        }));
-
-        // Return all photos for the media viewer
-        return nativePhotos;
-      } else {
-        // Fallback to old method
-        const { loadMonthContent } = await import('../utils/mediaScanner');
-        const result = await loadMonthContent(monthKey, {
-          batchSize: 50,
-          onProgress: progress => {
-            setScanProgress(progress);
-          },
-        });
-
-        setMonthContent(prev => ({
-          ...prev,
-          [monthKey]: {
-            items: result.items,
-            hasMore: result.hasMore,
-            nextCursor: result.nextCursor,
-            isLoading: false,
-          },
-        }));
-
-        return result.items;
-      }
+      const nativePhotos = await fetchMonthPhotosNative(monthKey, 0, limit);
+      const hasMore = Boolean(nativePhotos && nativePhotos.length === limit);
+      setMonthContent(prev => ({
+        ...prev,
+        [monthKey]: {
+          items: nativePhotos || [],
+          hasMore,
+          nextOffset: nativePhotos ? nativePhotos.length : 0,
+          isLoading: false,
+        },
+      }));
+      return nativePhotos || [];
     } catch (error) {
-      // Error loading month content
       setMonthContent(prev => ({
         ...prev,
         [monthKey]: {
           items: prev[monthKey]?.items || [],
           hasMore: false,
-          nextCursor: undefined,
+          nextOffset: prev[monthKey]?.nextOffset ?? 0,
           isLoading: false,
         },
       }));
-
       return [];
     }
   };
 
   // Load more content for a specific month (not needed anymore since native module loads all photos)
-  const loadMoreMonthContentMethod = async (monthKey: string) => {
-    return;
+  const loadMoreMonthContentMethod = async (
+    monthKey: string,
+    limit: number = 5,
+  ) => {
+    const current = monthContent[monthKey];
+    if (!current || !current.hasMore || current.isLoading) return;
+    setMonthContent(prev => ({
+      ...prev,
+      [monthKey]: {
+        ...current,
+        isLoading: true,
+      },
+    }));
+    try {
+      const { fetchMonthPhotosNative } = await import('../native/PhotoMonths');
+      const offset = current.items.length;
+      const morePhotos = await fetchMonthPhotosNative(monthKey, offset, limit);
+      const hasMore = Boolean(morePhotos && morePhotos.length > 0);
+      setMonthContent(prev => ({
+        ...prev,
+        [monthKey]: {
+          items: [...(current.items || []), ...(morePhotos || [])],
+          hasMore,
+          nextOffset: offset + (morePhotos ? morePhotos.length : 0),
+          isLoading: false,
+        },
+      }));
+    } catch (error) {
+      setMonthContent(prev => ({
+        ...prev,
+        [monthKey]: {
+          ...current,
+          isLoading: false,
+        },
+      }));
+    }
   };
 
   // Get all items for a specific month (only from loaded content)
@@ -663,11 +663,8 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
 
   // Month tracking methods
   const markMonthAsViewed = (monthKey: string, viewedCount: number = 1) => {
-    console.log('🎯 markMonthAsViewed called:', { monthKey, viewedCount });
-
     setViewedMonths(prev => {
       const updated = { ...prev, [monthKey]: true };
-      console.log('📊 Updated viewedMonths:', updated);
       // Save to storage
       AsyncStorage.setItem('viewedMonths', JSON.stringify(updated)).catch(
         () => {
@@ -682,16 +679,10 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     const totalItems = monthItems.length;
     const percentage =
       totalItems > 0 ? Math.round((viewedCount / totalItems) * 100) : 0;
-    console.log('📈 Progress calculation:', {
-      viewedCount,
-      totalItems,
-      percentage,
-    });
 
     // Update individual month progress with actual percentage
     setIndividualMonthProgress(prev => {
       const updated = { ...prev, [monthKey]: percentage };
-      console.log('💾 Updated individualMonthProgress:', updated);
       // Save to storage
       AsyncStorage.setItem(
         'individualMonthProgress',
@@ -771,27 +762,57 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
         const allPhotos = await fetchAllPhotosNative();
 
         if (allPhotos && allPhotos.length > 0) {
-          // Group photos by composite key: pixelWidth, pixelHeight, timestamp
-          const metaGroups: { [key: string]: MediaItem[] } = {};
+          // Separate photos and videos for different duplicate detection logic
+          const photos = allPhotos.filter(item => item.type === 'photo');
+          const videos = allPhotos.filter(item => item.type === 'video');
 
-          allPhotos.forEach(photo => {
-            // Use 0 as fallback for missing fields
-            const pixelWidth = (photo as any).pixelWidth || 0;
-            const pixelHeight = (photo as any).pixelHeight || 0;
-            const timestamp = (photo as any).timestamp || 0;
-            const key = `${pixelWidth}_${pixelHeight}_${timestamp}`;
-            if (!metaGroups[key]) {
-              metaGroups[key] = [];
-            }
-            metaGroups[key].push(photo);
-          });
-
-          // Find groups with more than one item (duplicates)
           const duplicateGroups: { [key: string]: MediaItem[] } = {};
           const allDuplicates: MediaItem[] = [];
 
-          Object.keys(metaGroups).forEach(key => {
-            const group = metaGroups[key];
+          // For PHOTOS: Group by filename pattern and timestamp proximity
+          const photoGroups: { [key: string]: MediaItem[] } = {};
+          photos.forEach(photo => {
+            const filename = photo.filename || '';
+            const timestamp = (photo as any).timestamp || 0;
+
+            // Extract base filename without extension and numbers
+            const baseFilename = filename
+              .replace(/_\d+$/, '')
+              .replace(/\.[^.]*$/, '');
+
+            // Round timestamp to nearest 10 seconds for more tolerance
+            const roundedTimestamp = Math.floor(timestamp / 10000) * 10000;
+
+            const key = `photo_${baseFilename}_${roundedTimestamp}`;
+            if (!photoGroups[key]) {
+              photoGroups[key] = [];
+            }
+            photoGroups[key].push(photo);
+          });
+
+          // For VIDEOS: Group by filename (more reliable for forwarded/shared videos)
+          const videoGroups: { [key: string]: MediaItem[] } = {};
+          videos.forEach(video => {
+            const filename = video.filename || 'unknown_video';
+            const key = `video_${filename}`;
+            if (!videoGroups[key]) {
+              videoGroups[key] = [];
+            }
+            videoGroups[key].push(video);
+          });
+
+          // Find duplicate photos (same dimensions + timestamp)
+          Object.keys(photoGroups).forEach(key => {
+            const group = photoGroups[key];
+            if (group.length > 1) {
+              duplicateGroups[key] = group;
+              allDuplicates.push(...group);
+            }
+          });
+
+          // Find duplicate videos (same filename)
+          Object.keys(videoGroups).forEach(key => {
+            const group = videoGroups[key];
             if (group.length > 1) {
               duplicateGroups[key] = group;
               allDuplicates.push(...group);
