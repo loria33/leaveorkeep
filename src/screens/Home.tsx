@@ -26,32 +26,19 @@ import { MonthSelectionData } from '../utils/mediaScanner';
 
 const logoImage = require('../assets/logoinApp.png');
 
-// Vibrant color palette for month cards
+// Unified 4-color pastel palette (Light Blue, Light Purple, Light Teal, Light Pink)
+const gradientPalette = {
+  lightBlue: ['#9FD3FF', '#CBE7FF'],
+  lightPurple: ['#CDB6FF', '#E6DDFF'],
+  lightTeal: ['#A8F0E1', '#D1FFF4'],
+  lightPink: ['#FFB3C1', '#FFD6E0'],
+};
+
 const monthGradients = [
-  ['#FF4757', '#FF6B7A'], // Bright Red
-  ['#00D2D3', '#00E5E6'], // Bright Turquoise
-  ['#2E86DE', '#4A9EFF'], // Bright Blue
-  ['#10AC84', '#1DD1A1'], // Bright Green
-  ['#FFA502', '#FFB142'], // Bright Orange
-  ['#9C88FF', '#B8A9FF'], // Bright Purple
-  ['#00D2D3', '#00E5E6'], // Bright Cyan
-  ['#FFA502', '#FFB142'], // Bright Yellow
-  ['#9C88FF', '#B8A9FF'], // Bright Lavender
-  ['#2E86DE', '#4A9EFF'], // Bright Sky Blue
-  ['#FF6B6B', '#FF8E8E'], // Bright Coral
-  ['#10AC84', '#1DD1A1'], // Bright Lime
-  ['#FF4757', '#FF6B7A'], // Bright Pink
-  ['#2E86DE', '#4A9EFF'], // Bright Azure
-  ['#FFA502', '#FFB142'], // Bright Gold
-  ['#9C88FF', '#B8A9FF'], // Bright Violet
-  ['#10AC84', '#1DD1A1'], // Bright Emerald
-  ['#FF6B6B', '#FF8E8E'], // Bright Rose
-  ['#00D2D3', '#00E5E6'], // Bright Teal
-  ['#FF4757', '#FF6B7A'], // Bright Magenta
-  ['#FFA502', '#FFB142'], // Bright Amber
-  ['#9C88FF', '#B8A9FF'], // Bright Indigo
-  ['#10AC84', '#1DD1A1'], // Bright Mint
-  ['#FF6B6B', '#FF8E8E'], // Bright Ruby
+  gradientPalette.lightBlue,
+  gradientPalette.lightPurple,
+  gradientPalette.lightTeal,
+  gradientPalette.lightPink,
 ];
 
 const Home: React.FC = () => {
@@ -103,6 +90,7 @@ const Home: React.FC = () => {
   const [hideTimeFilters, setHideTimeFilters] = useState(false);
   const [hideSourceFilters, setHideSourceFilters] = useState(false);
   const [timeFilterItems, setTimeFilterItems] = useState<MediaItem[]>([]);
+  const [specialFiltersCollapsed, setSpecialFiltersCollapsed] = useState(true);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -795,312 +783,173 @@ const Home: React.FC = () => {
           >
             {/* Special Filters Section */}
             <View style={styles.specialFiltersContainer}>
-              <Text style={styles.specialFiltersHeader}>Special Filters</Text>
+              <TouchableOpacity
+                style={styles.specialFiltersHeaderRow}
+                onPress={() =>
+                  setSpecialFiltersCollapsed(!specialFiltersCollapsed)
+                }
+                activeOpacity={0.7}
+              >
+                <Text style={styles.specialFiltersHeaderText}>
+                  Special Filters
+                </Text>
+                <Text style={styles.specialFiltersChevron}>
+                  {specialFiltersCollapsed ? '⌄' : '⌃'}
+                </Text>
+              </TouchableOpacity>
 
-              {/* Duplicate Images and Videos Cards */}
-              {!hideDuplicates && (
-                <View style={styles.duplicateCardsContainer}>
-                  <View
-                    style={{
-                      width: '85%',
-                      flexDirection: 'row',
-                      justifyContent: 'space-evenly',
-                      alignItems: 'center',
-                    }}
-                  >
-                    {/* Duplicate Images Card */}
-                    <TouchableOpacity
-                      style={[
-                        styles.duplicateCardHalf,
-                        getResponsiveFilterStyles(
-                          isTablet,
-                          screenWidth,
-                          isSmallScreen,
-                        ).duplicateCardHalf,
-                        duplicateItems.filter(item => item.type === 'photo')
-                          .length === 0 && styles.disabledCard,
-                      ]}
-                      onPress={() => handleDuplicateTypePress('photos')}
-                      disabled={
-                        duplicateItems.filter(item => item.type === 'photo')
-                          .length === 0
-                      }
-                    >
+              {!specialFiltersCollapsed && (
+                <>
+                  {/* Duplicates group */}
+                  <View style={styles.filterGroup}>
+                    <View style={styles.groupHeaderRow}>
+                      <Text style={styles.groupTitle}>Duplicates</Text>
+                      <TouchableOpacity
+                        style={styles.hideButton}
+                        onPress={handleHideDuplicates}
+                      >
+                        <Text
+                          style={[
+                            styles.hideButtonText,
+                            isSmallScreen && styles.hideButtonTextMobile,
+                          ]}
+                        >
+                          {hideDuplicates
+                            ? '👁️'
+                            : isSmallScreen
+                            ? '🚫'
+                            : 'Hide'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {!hideDuplicates && (
                       <LinearGradient
-                        colors={['#FF6B6B', '#FF8E8E']}
-                        style={styles.duplicateCardGradient}
+                        colors={gradientPalette.lightPurple}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
+                        style={styles.groupCardGradient}
                       >
-                        <View style={styles.duplicateCardContent}>
-                          <View style={styles.duplicateInfo}>
-                            <Text
-                              style={[
-                                styles.duplicateTitle,
-                                getResponsiveFilterStyles(
-                                  isTablet,
-                                  screenWidth,
-                                  isSmallScreen,
-                                ).duplicateTitle,
-                              ]}
-                            >
-                              📸 Duplicate Photos
-                            </Text>
-                            <Text
-                              style={[
-                                styles.duplicateCount,
-                                getResponsiveFilterStyles(
-                                  isTablet,
-                                  screenWidth,
-                                  isSmallScreen,
-                                ).duplicateCount,
-                              ]}
-                            >
-                              {
-                                duplicateItems.filter(
-                                  item => item.type === 'photo',
-                                ).length
-                              }{' '}
-                              photos
-                            </Text>
+                        <View style={styles.groupCardInner}>
+                          <View style={styles.groupCardContent}>
+                            <View style={styles.groupIconCircle}>
+                              <Text style={styles.groupIcon}>♻️</Text>
+                            </View>
+                            <View style={styles.groupTextCol}>
+                              <Text style={styles.groupPrimary}>
+                                Find and review duplicates
+                              </Text>
+                              <Text style={styles.groupSecondary}>
+                                {
+                                  duplicateItems.filter(i => i.type === 'photo')
+                                    .length
+                                }{' '}
+                                photos •{' '}
+                                {
+                                  duplicateItems.filter(i => i.type === 'video')
+                                    .length
+                                }{' '}
+                                videos
+                              </Text>
+                            </View>
                           </View>
-                          <View style={styles.duplicateRight}>
-                            <Text style={styles.duplicateChevron}>›</Text>
+                          <View style={styles.chipRow}>
+                            <TouchableOpacity
+                              style={[
+                                styles.chipButton,
+                                duplicateItems.filter(i => i.type === 'photo')
+                                  .length === 0 && styles.chipDisabled,
+                              ]}
+                              onPress={() => handleDuplicateTypePress('photos')}
+                              disabled={
+                                duplicateItems.filter(i => i.type === 'photo')
+                                  .length === 0
+                              }
+                            >
+                              <Text style={styles.chipText}>Photos</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                styles.chipButton,
+                                duplicateItems.filter(i => i.type === 'video')
+                                  .length === 0 && styles.chipDisabled,
+                              ]}
+                              onPress={() => handleDuplicateTypePress('videos')}
+                              disabled={
+                                duplicateItems.filter(i => i.type === 'video')
+                                  .length === 0
+                              }
+                            >
+                              <Text style={styles.chipText}>Videos</Text>
+                            </TouchableOpacity>
                           </View>
                         </View>
                       </LinearGradient>
-                    </TouchableOpacity>
+                    )}
+                  </View>
 
-                    {/* Duplicate Videos Card */}
-                    <TouchableOpacity
-                      style={[
-                        styles.duplicateCardHalf,
-                        getResponsiveFilterStyles(
-                          isTablet,
-                          screenWidth,
-                          isSmallScreen,
-                        ).duplicateCardHalf,
-                        duplicateItems.filter(item => item.type === 'video')
-                          .length === 0 && styles.disabledCard,
-                      ]}
-                      onPress={() => handleDuplicateTypePress('videos')}
-                      disabled={
-                        duplicateItems.filter(item => item.type === 'video')
-                          .length === 0
-                      }
-                    >
+                  {/* Recent group */}
+                  <View style={styles.filterGroup}>
+                    <View style={styles.groupHeaderRow}>
+                      <Text style={styles.groupTitle}>Recent</Text>
+                      <TouchableOpacity
+                        style={styles.hideButton}
+                        onPress={handleHideTimeFilters}
+                      >
+                        <Text
+                          style={[
+                            styles.hideButtonText,
+                            isSmallScreen && styles.hideButtonTextMobile,
+                          ]}
+                        >
+                          {hideTimeFilters
+                            ? '👁️'
+                            : isSmallScreen
+                            ? '🚫'
+                            : 'Hide'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    {!hideTimeFilters && (
                       <LinearGradient
-                        colors={['#4ECDC4', '#44A08D']}
-                        style={styles.duplicateCardGradient}
+                        colors={gradientPalette.lightBlue}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
+                        style={styles.groupCardGradient}
                       >
-                        <View style={styles.duplicateCardContent}>
-                          <View style={styles.duplicateInfo}>
-                            <Text
-                              style={[
-                                styles.duplicateTitle,
-                                getResponsiveFilterStyles(
-                                  isTablet,
-                                  screenWidth,
-                                  isSmallScreen,
-                                ).duplicateTitle,
-                              ]}
-                            >
-                              🎥 Duplicate Videos
-                            </Text>
-                            <Text
-                              style={[
-                                styles.duplicateCount,
-                                getResponsiveFilterStyles(
-                                  isTablet,
-                                  screenWidth,
-                                  isSmallScreen,
-                                ).duplicateCount,
-                              ]}
-                            >
-                              {
-                                duplicateItems.filter(
-                                  item => item.type === 'video',
-                                ).length
-                              }{' '}
-                              videos
-                            </Text>
+                        <View style={styles.groupCardInner}>
+                          <View style={styles.groupCardContent}>
+                            <View style={styles.groupIconCircle}>
+                              <Text style={styles.groupIcon}>📆</Text>
+                            </View>
+                            <View style={styles.groupTextCol}>
+                              <Text style={styles.groupPrimary}>
+                                Quick time filters
+                              </Text>
+                              <Text style={styles.groupSecondary}>
+                                Today • Yesterday
+                              </Text>
+                            </View>
                           </View>
-                          <View style={styles.duplicateRight}>
-                            <Text style={styles.duplicateChevron}>›</Text>
+                          <View style={styles.chipRow}>
+                            <TouchableOpacity
+                              style={styles.chipButton}
+                              onPress={() => handleTimeFilterPress('today')}
+                            >
+                              <Text style={styles.chipText}>Today</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.chipButton}
+                              onPress={() => handleTimeFilterPress('yesterday')}
+                            >
+                              <Text style={styles.chipText}>Yesterday</Text>
+                            </TouchableOpacity>
                           </View>
                         </View>
                       </LinearGradient>
-                    </TouchableOpacity>
+                    )}
                   </View>
-                  <View
-                    style={{
-                      width: '15%',
-                      flexDirection: 'row',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      paddingHorizontal: 4,
-                    }}
-                  >
-                    {/* Hide Duplicates Button */}
-                    <TouchableOpacity
-                      style={styles.hideButton}
-                      onPress={handleHideDuplicates}
-                    >
-                      <Text
-                        style={[
-                          styles.hideButtonText,
-                          isSmallScreen && styles.hideButtonTextMobile,
-                        ]}
-                      >
-                        {isSmallScreen ? '🚫' : 'Hide'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-
-              {/* Time Filter Buttons */}
-              {!hideTimeFilters && (
-                <View style={styles.duplicateCardsContainer}>
-                  <View
-                    style={{
-                      width: '85%',
-                      flexDirection: 'row',
-                      justifyContent: 'space-evenly',
-                      alignItems: 'center',
-                    }}
-                  >
-                    {/* Today Card */}
-                    <TouchableOpacity
-                      style={[
-                        styles.duplicateCardHalf,
-                        getResponsiveFilterStyles(
-                          isTablet,
-                          screenWidth,
-                          isSmallScreen,
-                        ).duplicateCardHalf,
-                      ]}
-                      onPress={() => handleTimeFilterPress('today')}
-                    >
-                      <LinearGradient
-                        colors={['#FF6B6B', '#FF8E8E']}
-                        style={styles.duplicateCardGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                      >
-                        <View style={styles.duplicateCardContent}>
-                          <View style={styles.duplicateInfo}>
-                            <Text
-                              style={[
-                                styles.duplicateTitle,
-                                getResponsiveFilterStyles(
-                                  isTablet,
-                                  screenWidth,
-                                  isSmallScreen,
-                                ).duplicateTitle,
-                              ]}
-                            >
-                              📅 Today
-                            </Text>
-                            <Text
-                              style={[
-                                styles.duplicateCount,
-                                getResponsiveFilterStyles(
-                                  isTablet,
-                                  screenWidth,
-                                  isSmallScreen,
-                                ).duplicateCount,
-                              ]}
-                            >
-                              Today's media
-                            </Text>
-                          </View>
-                          <View style={styles.duplicateRight}>
-                            <Text style={styles.duplicateChevron}>›</Text>
-                          </View>
-                        </View>
-                      </LinearGradient>
-                    </TouchableOpacity>
-
-                    {/* Yesterday Card */}
-                    <TouchableOpacity
-                      style={[
-                        styles.duplicateCardHalf,
-                        getResponsiveFilterStyles(
-                          isTablet,
-                          screenWidth,
-                          isSmallScreen,
-                        ).duplicateCardHalf,
-                      ]}
-                      onPress={() => handleTimeFilterPress('yesterday')}
-                    >
-                      <LinearGradient
-                        colors={['#4ECDC4', '#44A08D']}
-                        style={styles.duplicateCardGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                      >
-                        <View style={styles.duplicateCardContent}>
-                          <View style={styles.duplicateInfo}>
-                            <Text
-                              style={[
-                                styles.duplicateTitle,
-                                getResponsiveFilterStyles(
-                                  isTablet,
-                                  screenWidth,
-                                  isSmallScreen,
-                                ).duplicateTitle,
-                              ]}
-                            >
-                              📅 Yesterday
-                            </Text>
-                            <Text
-                              style={[
-                                styles.duplicateCount,
-                                getResponsiveFilterStyles(
-                                  isTablet,
-                                  screenWidth,
-                                  isSmallScreen,
-                                ).duplicateCount,
-                              ]}
-                            >
-                              Yesterday's media
-                            </Text>
-                          </View>
-                          <View style={styles.duplicateRight}>
-                            <Text style={styles.duplicateChevron}>›</Text>
-                          </View>
-                        </View>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </View>
-                  <View
-                    style={{
-                      width: '15%',
-                      flexDirection: 'row',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      paddingHorizontal: 4,
-                    }}
-                  >
-                    {/* Hide Time Filters Button */}
-                    <TouchableOpacity
-                      style={styles.hideButton}
-                      onPress={handleHideTimeFilters}
-                    >
-                      <Text
-                        style={[
-                          styles.hideButtonText,
-                          isSmallScreen && styles.hideButtonTextMobile,
-                        ]}
-                      >
-                        {isSmallScreen ? '🚫' : 'Hide'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                </>
               )}
             </View>
 
@@ -1201,9 +1050,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fefefe',
   },
   headerContainer: {
-    backgroundColor: 'rgba(255, 250, 240, 0.8)',
+    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(245, 245, 220, 0.6)',
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
   },
   header: {
     paddingHorizontal: 20,
@@ -1234,13 +1083,13 @@ const styles = StyleSheet.create({
     marginLeft: 16,
   },
   refreshButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: '#ffffff',
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 10,
     marginRight: 12,
     borderWidth: 1,
-    borderColor: 'rgba(245, 245, 220, 0.8)',
+    borderColor: 'rgba(15, 23, 42, 0.08)',
   },
   refreshButtonText: {
     fontSize: 16,
@@ -1248,12 +1097,12 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
   },
   viewingLimitsBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: '#ffffff',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(245, 245, 220, 0.8)',
+    borderColor: 'rgba(15, 23, 42, 0.08)',
   },
   viewingLimitsText: {
     fontSize: 14,
@@ -1297,7 +1146,7 @@ const styles = StyleSheet.create({
   },
   monthCardGradient: {
     padding: 16,
-    minHeight: 100, // Increased height by 100% (was roughly 40px)
+    minHeight: 88,
   },
   monthCardContent: {
     flexDirection: 'row',
@@ -1314,41 +1163,29 @@ const styles = StyleSheet.create({
   },
   monthTitle: {
     fontSize: 20,
-    fontWeight: '700',
-    color: '#ffffff',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    fontWeight: '800',
+    color: '#0f172a',
   },
   monthCount: {
-    fontSize: 15,
-    color: '#ffffff',
-    fontWeight: '600',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    fontSize: 14,
+    color: '#334155',
+    fontWeight: '700',
   },
   monthRight: {
     marginLeft: 16,
   },
   monthChevron: {
     fontSize: 28,
-    color: '#ffffff',
+    color: '#0f172a',
     fontWeight: '300',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   monthProgressContainer: {
     marginTop: 4,
   },
   monthProgressText: {
     fontSize: 12,
-    color: '#ffffff',
+    color: '#334155',
     fontWeight: '600',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   loadingContainer: {
     flex: 1,
@@ -1506,6 +1343,54 @@ const styles = StyleSheet.create({
     alignContent: 'center',
     justifyContent: 'center',
   },
+  // New action-style cards used in special filters
+  actionCard: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    marginVertical: 8,
+  },
+  actionGradientSm: {
+    padding: 14,
+    minHeight: 68,
+    borderRadius: 18,
+  },
+  actionContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  actionIconLg: {
+    fontSize: 20,
+    lineHeight: 22,
+  },
+  actionTextCol: {
+    flex: 1,
+  },
+  actionTitleDark: {
+    color: '#0f172a',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  actionCountDark: {
+    color: '#334155',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  actionArrowDark: {
+    color: '#0f172a',
+    fontSize: 20,
+    fontWeight: '300',
+    marginLeft: 8,
+  },
   duplicateCard: {
     marginHorizontal: 20,
     marginVertical: 6,
@@ -1532,7 +1417,7 @@ const styles = StyleSheet.create({
   },
   duplicateCardGradient: {
     padding: 12,
-    minHeight: 80,
+    minHeight: 72,
   },
   duplicateCardContent: {
     flexDirection: 'row',
@@ -1549,19 +1434,13 @@ const styles = StyleSheet.create({
   },
   duplicateTitle: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#ffffff',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    fontWeight: '800',
+    color: '#0f172a',
   },
   duplicateCount: {
     fontSize: 12,
-    color: '#ffffff',
-    fontWeight: '600',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    color: '#334155',
+    fontWeight: '700',
   },
   duplicateSubtext: {
     fontSize: 14,
@@ -1576,11 +1455,8 @@ const styles = StyleSheet.create({
   },
   duplicateChevron: {
     fontSize: 20,
-    color: '#ffffff',
+    color: '#0f172a',
     fontWeight: '300',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   timeFilterContainer: {
     width: '100%',
@@ -1637,7 +1513,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
     borderRadius: 6,
-    backgroundColor: 'rgba(26, 26, 26, 0.1)',
+    backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
     minHeight: 28,
@@ -1682,28 +1558,106 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
   },
   specialFiltersContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
     marginHorizontal: 16,
     marginVertical: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(245, 245, 220, 0.8)',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+    shadowColor: gradientPalette.lightPink[1],
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 8,
   },
-  specialFiltersHeader: {
+  specialFiltersHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  specialFiltersHeaderText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  specialFiltersChevron: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 12,
-    textAlign: 'center',
+    color: '#0f172a',
+  },
+  filterGroup: {
+    marginBottom: 8,
+  },
+  groupHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  groupTitle: {
+    color: '#0f172a',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  groupCardGradient: {
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 30,
+    overflow: 'visible',
+  },
+  groupCardInner: {
+    width: '100%',
+  },
+  groupCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  groupIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  groupIcon: { fontSize: 18, lineHeight: 20 },
+  groupTextCol: { flex: 1 },
+  groupPrimary: {
+    color: '#0f172a',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  groupSecondary: {
+    color: '#334155',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  chipButton: {
+    backgroundColor: 'rgba(255,255,255,0.75)',
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+    marginBottom: 4,
+  },
+  chipDisabled: { opacity: 0.5 },
+  chipText: {
+    color: '#0f172a',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });
 

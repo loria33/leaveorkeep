@@ -454,7 +454,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
               <Image
                 source={{ uri: currentItem.uri }}
                 style={styles.media}
-                resizeMode="cover"
+                resizeMode="contain"
                 onError={() => {
                   // Image error
                 }}

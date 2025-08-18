@@ -19,7 +19,7 @@ class InterstitialAdManager {
   private static instance: InterstitialAdManager;
   private interstitialAd: InterstitialAd | null = null;
   private swipeCount = 0;
-  private readonly SWIPES_BEFORE_AD = 5;
+  private readonly SWIPES_BEFORE_AD = 7;
   private isAdLoaded = false;
   private isAdLoading = false;
   private isPremiumUser = false;

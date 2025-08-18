@@ -28,6 +28,13 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
   onSelectAllMedia,
   onClose,
 }) => {
+  // New responsive sizing for vertical action cards
+  const isShortHeight = height < 700;
+  const cardHeight = Math.max(74, Math.min(110, Math.floor(height * 0.12)));
+  const iconCircleSize = Math.round(cardHeight * 0.56);
+  const iconFontSize = Math.max(18, Math.round(iconCircleSize * 0.5));
+  const iconLineHeight = iconFontSize;
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -42,84 +49,142 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
       </View>
 
       {/* Content */}
-      <View style={styles.content}>
-        <Text style={styles.title}>Choose what to view</Text>
-        <Text style={styles.subtitle}>
+      <View style={[styles.content, isShortHeight && { paddingTop: 16 }]}>
+        <Text style={[styles.title, isShortHeight && { fontSize: 24 }]}>
+          Choose what to view
+        </Text>
+        <Text
+          style={[
+            styles.subtitle,
+            isShortHeight && { fontSize: 14, marginBottom: 28 },
+          ]}
+        >
           {monthData.totalCount} total items in {monthData.monthName}
         </Text>
 
-        {/* Buttons Grid */}
-        <View style={styles.buttonsGrid}>
-          {/* Photos Button */}
+        {/* Vertical action cards */}
+        <View style={styles.actionsContainer}>
+          {/* All Media (primary) */}
           <TouchableOpacity
-            style={[
-              styles.gridButton,
-              monthData.photoCount === 0 && styles.disabledButton,
-            ]}
+            onPress={onSelectAllMedia}
+            activeOpacity={0.9}
+            style={{ marginBottom: 12 }}
+          >
+            <LinearGradient
+              colors={['#B9DEFF', '#D9EEFF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.actionGradient, { height: cardHeight }]}
+            >
+              <View style={styles.actionContent}>
+                <View
+                  style={[
+                    styles.iconCircle,
+                    { width: iconCircleSize, height: iconCircleSize },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.actionIcon,
+                      { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                    ]}
+                  >
+                    📱
+                  </Text>
+                </View>
+                <View style={styles.actionTexts}>
+                  <Text style={styles.actionTitle}>All Media</Text>
+                  <Text style={styles.actionCount}>
+                    {monthData.totalCount}{' '}
+                    {monthData.totalCount === 1 ? 'item' : 'items'}
+                  </Text>
+                </View>
+                <Text style={styles.actionArrow}>›</Text>
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          {/* Photos */}
+          <TouchableOpacity
             onPress={onSelectPhotos}
             disabled={monthData.photoCount === 0}
+            activeOpacity={0.9}
+            style={{
+              marginBottom: 12,
+              opacity: monthData.photoCount === 0 ? 0.5 : 1,
+            }}
           >
             <LinearGradient
-              colors={['#FF6B6B', '#FF8E8E']}
-              style={styles.gridButtonGradient}
+              colors={['#FFC2CF', '#FFDDE6']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
+              style={[styles.actionGradient, { height: cardHeight }]}
             >
-              <View style={styles.gridButtonContent}>
-                <Text style={styles.gridButtonIcon}>📸</Text>
-                <Text style={styles.gridButtonTitle}>Photos</Text>
-                <Text style={styles.gridButtonCount}>
-                  {monthData.photoCount}{' '}
-                  {monthData.photoCount === 1 ? 'photo' : 'photos'}
-                </Text>
+              <View style={styles.actionContent}>
+                <View
+                  style={[
+                    styles.iconCircle,
+                    { width: iconCircleSize, height: iconCircleSize },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.actionIcon,
+                      { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                    ]}
+                  >
+                    📸
+                  </Text>
+                </View>
+                <View style={styles.actionTexts}>
+                  <Text style={styles.actionTitle}>Photos</Text>
+                  <Text style={styles.actionCount}>
+                    {monthData.photoCount}{' '}
+                    {monthData.photoCount === 1 ? 'photo' : 'photos'}
+                  </Text>
+                </View>
+                <Text style={styles.actionArrow}>›</Text>
               </View>
             </LinearGradient>
           </TouchableOpacity>
 
-          {/* Videos Button */}
+          {/* Videos */}
           <TouchableOpacity
-            style={[
-              styles.gridButton,
-              monthData.videoCount === 0 && styles.disabledButton,
-            ]}
             onPress={onSelectVideos}
             disabled={monthData.videoCount === 0}
+            activeOpacity={0.9}
+            style={{ opacity: monthData.videoCount === 0 ? 0.5 : 1 }}
           >
             <LinearGradient
-              colors={['#4ECDC4', '#44A08D']}
-              style={styles.gridButtonGradient}
+              colors={['#D1C4FF', '#ECE6FF']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
+              style={[styles.actionGradient, { height: cardHeight }]}
             >
-              <View style={styles.gridButtonContent}>
-                <Text style={styles.gridButtonIcon}>🎥</Text>
-                <Text style={styles.gridButtonTitle}>Videos</Text>
-                <Text style={styles.gridButtonCount}>
-                  {monthData.videoCount}{' '}
-                  {monthData.videoCount === 1 ? 'video' : 'videos'}
-                </Text>
-              </View>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {/* All Media Button */}
-          <TouchableOpacity
-            style={styles.gridButton}
-            onPress={onSelectAllMedia}
-          >
-            <LinearGradient
-              colors={['#A8E6CF', '#88D8C0']}
-              style={styles.gridButtonGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <View style={styles.gridButtonContent}>
-                <Text style={styles.gridButtonIcon}>📱</Text>
-                <Text style={styles.gridButtonTitle}>All Media</Text>
-                <Text style={styles.gridButtonCount}>
-                  {monthData.totalCount}{' '}
-                  {monthData.totalCount === 1 ? 'item' : 'items'}
-                </Text>
+              <View style={styles.actionContent}>
+                <View
+                  style={[
+                    styles.iconCircle,
+                    { width: iconCircleSize, height: iconCircleSize },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.actionIcon,
+                      { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                    ]}
+                  >
+                    🎥
+                  </Text>
+                </View>
+                <View style={styles.actionTexts}>
+                  <Text style={styles.actionTitle}>Videos</Text>
+                  <Text style={styles.actionCount}>
+                    {monthData.videoCount}{' '}
+                    {monthData.videoCount === 1 ? 'video' : 'videos'}
+                  </Text>
+                </View>
+                <Text style={styles.actionArrow}>›</Text>
               </View>
             </LinearGradient>
           </TouchableOpacity>
@@ -133,6 +198,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 2000,
+    elevation: 24,
   },
   header: {
     flexDirection: 'row',
@@ -164,15 +236,17 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 80,
   },
   title: {
     color: '#fff',
-    fontSize: 28,
-    fontWeight: 'bold',
+    fontSize: 26,
+    fontWeight: '800',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   subtitle: {
     color: 'rgba(255, 255, 255, 0.7)',
@@ -180,57 +254,47 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 40,
   },
-  buttonsGrid: {
+  actionsContainer: {
+    paddingHorizontal: 16,
+  },
+  actionGradient: {
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  actionContent: {
     flexDirection: 'row',
-    justifyContent: 'space-evenly',
     alignItems: 'center',
-    marginTop: 20,
-    paddingHorizontal: 20,
   },
-  gridButton: {
-    width: (width - 60) / 3,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-    aspectRatio: 1,
-  },
-  disabledButton: {
-    opacity: 0.5,
-  },
-  gridButtonGradient: {
-    flex: 1,
-    justifyContent: 'center',
-    alignContent: 'center',
-    margin: 16,
-  },
-  gridButtonContent: {
-    flex: 1,
-    justifyContent: 'center',
+  iconCircle: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.6)',
     alignItems: 'center',
-    width: '100%',
+    justifyContent: 'center',
+    marginRight: 12,
   },
-  gridButtonIcon: {
-    fontSize: 32,
-    marginBottom: 8,
-  },
-  gridButtonTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+  actionIcon: {
     textAlign: 'center',
-    marginBottom: 4,
-    width: '100%',
   },
-  gridButtonCount: {
-    color: 'rgba(255, 255, 255, 0.8)',
+  actionTexts: {
+    flex: 1,
+  },
+  actionTitle: {
+    color: '#0f172a',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  actionCount: {
+    color: '#334155',
     fontSize: 12,
     fontWeight: '600',
-    textAlign: 'center',
-    width: '100%',
+    marginTop: 2,
+  },
+  actionArrow: {
+    color: '#0f172a',
+    fontSize: 22,
+    fontWeight: '300',
+    marginLeft: 8,
   },
   mediaButton: {
     marginBottom: 20,
