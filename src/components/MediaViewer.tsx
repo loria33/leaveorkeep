@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,16 +7,14 @@ import {
   Dimensions,
   StatusBar,
   Animated,
-  Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import Video from 'react-native-video';
 import Share from 'react-native-share';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { useMedia, MediaItem } from '../context/MediaContext';
-import InterstitialAdManager from '../utils/InterstitialAdManager';
 
-// Import the share icon
 const shareIcon = require('../assets/share.png');
 
 interface MediaViewerProps {
@@ -31,7 +29,7 @@ interface MediaViewerProps {
 const { width, height } = Dimensions.get('window');
 
 const MediaViewer: React.FC<MediaViewerProps> = ({
-  items,
+  items: initialItems,
   initialIndex,
   onClose,
   onViewProgress,
@@ -40,23 +38,30 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
 }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [showControls, setShowControls] = useState(true);
-  const [remainingTime, setRemainingTime] = useState('');
   const [isNavigating, setIsNavigating] = useState(false);
-  const [showOnlyOneMessage, setShowOnlyOneMessage] = useState(false);
-  const [viewedPhotos, setViewedPhotos] = useState<Set<number>>(
-    new Set([initialIndex]),
-  );
   const [videoError, setVideoError] = useState(false);
   const [videoPaused, setVideoPaused] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [items, setItems] = useState<MediaItem[]>(initialItems);
+  const [showOnlyOneMessage, setShowOnlyOneMessage] = useState(false);
+  const viewedItemsRef = useRef<Set<string>>(new Set());
+
+  // Update items when initialItems prop changes (when parent loads more)
+  useEffect(() => {
+    // Always sync with props if they have more items
+    if (initialItems.length >= items.length) {
+      setItems(initialItems);
+    }
+  }, [initialItems]);
 
   const {
     addToTrash,
     canViewMedia,
     incrementViewCount,
-    viewingLimits,
-    getRemainingCooldownTime,
     loadMoreMonthContent,
     monthContent,
+    markMediaItemAsViewed,
+    checkAndMarkMonthCompleted,
   } = useMedia();
 
   const translateX = useRef(new Animated.Value(0)).current;
@@ -66,61 +71,141 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
 
   const currentItem = items[currentIndex];
 
-  // Update countdown timer
-  React.useEffect(() => {
-    if (!canViewMedia()) {
-      const updateTimer = () => {
-        const timeLeft = getRemainingCooldownTime();
-        if (timeLeft <= 0) {
-          setRemainingTime('Ready!');
-          return;
-        }
+  // Determine media type filter based on current items
+  const getMediaTypeFilter = (): 'photo' | 'video' | 'all' => {
+    if (items.length === 0) return 'all';
+    const hasPhotos = items.some(item => item.type === 'photo');
+    const hasVideos = items.some(item => item.type === 'video');
+    if (hasPhotos && !hasVideos) return 'photo';
+    if (hasVideos && !hasPhotos) return 'video';
+    return 'all';
+  };
 
-        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
-        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
-        setRemainingTime(
-          `${hours}:${minutes.toString().padStart(2, '0')}:${seconds
-            .toString()
-            .padStart(2, '0')}`,
-        );
-      };
-
-      updateTimer(); // Update immediately
-      const interval = setInterval(updateTimer, 1000); // Update every second
-
-      return () => clearInterval(interval);
+  // Filter items based on current media type
+  const filterItems = (allItems: MediaItem[]): MediaItem[] => {
+    const filterType = getMediaTypeFilter();
+    if (filterType === 'photo') {
+      return allItems.filter(item => item.type === 'photo');
+    } else if (filterType === 'video') {
+      return allItems.filter(item => item.type === 'video');
     }
-  }, [canViewMedia, getRemainingCooldownTime]);
+    return allItems;
+  };
 
-  // Increment view count when component mounts or index changes
-  React.useEffect(() => {
+  // Load first 40 items when component mounts if needed
+  useEffect(() => {
+    if (monthKey && items.length < 40) {
+      const content = monthContent[monthKey];
+      if (content && content.hasMore && !content.isLoading) {
+        setIsLoading(true);
+        loadMoreMonthContent(monthKey, 40)
+          .finally(() => {
+            setIsLoading(false);
+          });
+      }
+    }
+  }, [monthKey]);
+
+  // Load next 40 items when viewing item 10
+  useEffect(() => {
+    if (monthKey && currentIndex === 10 && items.length < 80) {
+      const content = monthContent[monthKey];
+      if (content && content.hasMore && !content.isLoading) {
+        setIsLoading(true);
+        loadMoreMonthContent(monthKey, 40)
+          .then(() => {
+            const updatedContent = monthContent[monthKey];
+            if (updatedContent && updatedContent.items.length > items.length) {
+              const filtered = filterItems(updatedContent.items);
+              setItems(filtered);
+            }
+          })
+          .finally(() => {
+            setIsLoading(false);
+          });
+      }
+    }
+  }, [currentIndex, monthKey]);
+
+  // Update items when monthContent changes - filter based on current items type
+  // This handles the case where loadMoreMonthContent updates monthContent
+  useEffect(() => {
+    if (monthKey) {
+      const content = monthContent[monthKey];
+      if (content && content.items.length > 0) {
+        const filtered = filterItems(content.items);
+        // Update if we have more items than current local state
+        if (filtered.length >= items.length) {
+          setItems(filtered);
+        }
+      }
+    }
+  }, [monthContent, monthKey, items.length]);
+
+  // Track viewed items and increment view count when index changes
+  useEffect(() => {
     if (canViewMedia()) {
       incrementViewCount();
     }
-    // Reset video error when item changes
-
     setVideoError(false);
     setVideoPaused(false);
-  }, [currentIndex]);
 
-  // Load more content every 3 swipes when approaching the end
-  React.useEffect(() => {
-    if (!monthKey) return;
-    const current = monthContent[monthKey];
-    if (!current) return;
-
-    // Load 10 more images every 3 swipes if we're within 10 items of the end
-    if (
-      currentIndex > 0 &&
-      currentIndex % 3 === 0 &&
-      currentIndex >= current.items.length - 10 &&
-      current.hasMore &&
-      !current.isLoading
-    ) {
-      loadMoreMonthContent(monthKey, 10);
+    // Mark current item as viewed immediately when displayed
+    if (currentItem && !viewedItemsRef.current.has(currentItem.id)) {
+      viewedItemsRef.current.add(currentItem.id);
+      // Mark immediately - if user is viewing it, they've seen it
+      markMediaItemAsViewed(currentItem.id).then(() => {
+        // Check if month is completed after marking item as viewed
+        if (monthKey && 
+            monthKey !== 'DUPLICATES' && 
+            !monthKey.startsWith('TIME_FILTER_') && 
+            !monthKey.startsWith('SOURCE_FILTER_')) {
+          // Check completion every 3 items or on last item
+          if (currentIndex % 3 === 0 || currentIndex === items.length - 1) {
+            checkAndMarkMonthCompleted(monthKey).catch(() => {
+              // Error checking completion
+            });
+          }
+        }
+      });
     }
-  }, [currentIndex, monthKey, monthContent, loadMoreMonthContent]);
+  }, [currentIndex, currentItem]);
+
+  // Save viewed items and check completion when component unmounts (viewer closes)
+  useEffect(() => {
+    return () => {
+      // Mark all items that were displayed as viewed (in case any were missed)
+      const itemsToMark = Array.from(viewedItemsRef.current);
+      if (itemsToMark.length > 0) {
+        import('../utils/viewedMediaTracker').then(({ markItemsAsViewed, saveViewedItemsImmediately }) => {
+          markItemsAsViewed(itemsToMark).then(() => {
+            saveViewedItemsImmediately().catch(() => {
+              // Error saving
+            });
+          });
+        });
+      } else {
+        import('../utils/viewedMediaTracker').then(({ saveViewedItemsImmediately }) => {
+          saveViewedItemsImmediately().catch(() => {
+            // Error saving
+          });
+        });
+      }
+      
+      // Check month completion when viewer closes
+      if (monthKey && 
+          monthKey !== 'DUPLICATES' && 
+          !monthKey.startsWith('TIME_FILTER_') && 
+          !monthKey.startsWith('SOURCE_FILTER_')) {
+        // Wait a bit for storage to be saved, then check completion
+        setTimeout(() => {
+          checkAndMarkMonthCompleted(monthKey).catch(() => {
+            // Error checking completion
+          });
+        }, 2000);
+      }
+    };
+  }, [monthKey]);
 
   // Check if viewing is blocked
   if (!canViewMedia()) {
@@ -130,50 +215,6 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         <View style={styles.blockedContainer}>
           <Text style={styles.blockedIcon}>⏳</Text>
           <Text style={styles.blockedTitle}>Viewing Limit Reached</Text>
-          <Text style={styles.blockedText}>
-            You've reached your viewing limit of {viewingLimits.viewCount}{' '}
-            pictures.
-          </Text>
-          <Text style={styles.timerText}>{remainingTime}</Text>
-          <Text style={styles.blockedSubtext}>
-            Time remaining until you can view more pictures
-          </Text>
-
-          {/* Premium Subscription Options 
-          
-          <View style={styles.premiumContainer}>
-            <Text style={styles.premiumTitle}>Upgrade to Premium</Text>
-
-            <TouchableOpacity style={styles.premiumOption}>
-              <View style={styles.premiumOptionHeader}>
-                <Text style={styles.premiumOptionTitle}>👑 King User</Text>
-                <Text style={styles.premiumOptionPrice}>$2/month</Text>
-              </View>
-              <Text style={styles.premiumOptionDescription}>
-                • No ads{'\n'}• No lockout time{'\n'}• Unlimited viewing
-              </Text>
-              <TouchableOpacity style={styles.premiumButton}>
-                <Text style={styles.premiumButtonText}>Become King</Text>
-              </TouchableOpacity>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.premiumOption}>
-              <View style={styles.premiumOptionHeader}>
-                <Text style={styles.premiumOptionTitle}>
-                  ⚡ Ultra King User
-                </Text>
-                <Text style={styles.premiumOptionPrice}>$1/month</Text>
-              </View>
-              <Text style={styles.premiumOptionDescription}>
-                • No ads{'\n'}• Keep timer (viewing limits){'\n'}• Ad-free
-                experience
-              </Text>
-              <TouchableOpacity style={styles.premiumButton}>
-                <Text style={styles.premiumButtonText}>Become Ultra King</Text>
-              </TouchableOpacity>
-            </TouchableOpacity>
-          </View>*/}
-
           <TouchableOpacity style={styles.blockedButton} onPress={onClose}>
             <Text style={styles.blockedButtonText}>Close</Text>
           </TouchableOpacity>
@@ -185,6 +226,13 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   const smoothNavigate = (direction: 'next' | 'prev') => {
     if (isNavigating) return;
 
+    // If only one item, show message and return
+    if (items.length === 1) {
+      setShowOnlyOneMessage(true);
+      setTimeout(() => setShowOnlyOneMessage(false), 2000);
+      return;
+    }
+
     setIsNavigating(true);
 
     const targetIndex =
@@ -193,28 +241,12 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     // Handle endless loop navigation
     let finalTargetIndex = targetIndex;
     if (targetIndex < 0) {
-      // Swipe right on first image -> go to last image
       finalTargetIndex = items.length - 1;
     } else if (targetIndex >= items.length) {
-      // Swipe left on last image -> go to first image
       finalTargetIndex = 0;
     }
 
-    // Only show "only one" message if there's actually only one image
-    if (items.length === 1) {
-      setIsNavigating(false);
-      setShowOnlyOneMessage(true);
-      setTimeout(() => setShowOnlyOneMessage(false), 2000);
-      return;
-    }
-
-    // Don't navigate if ad is showing
-    if (InterstitialAdManager.getInstance().isCurrentlyShowing()) {
-      setIsNavigating(false);
-      return;
-    }
-
-    // Update the index immediately to prevent showing previous image
+    // Update the index immediately
     setCurrentIndex(finalTargetIndex);
 
     // Animate the transition
@@ -237,24 +269,11 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         useNativeDriver: true,
       }),
     ]).start(() => {
-      // Track viewed photo
-      setViewedPhotos(prev => new Set([...prev, finalTargetIndex]));
-
       // Reset animations for new item
       translateX.setValue(0);
       opacity.setValue(1);
       scale.setValue(1);
-
-      // Handle ads after navigation and always reset navigation state
-      InterstitialAdManager.getInstance().handleSwipe(() => {
-        setIsNavigating(false);
-      });
-
-      // Also reset navigation state immediately if no ad is shown
-      // This ensures we can swipe again even without ads
-      setTimeout(() => {
-        setIsNavigating(false);
-      }, 100);
+      setIsNavigating(false);
     });
   };
 
@@ -267,7 +286,9 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   };
 
   const handleTrash = () => {
-    // Direct trash without confirmation
+    if (!currentItem) return;
+
+    // Add to trash
     addToTrash(currentItem);
 
     // Animate and move to next item
@@ -283,13 +304,22 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         useNativeDriver: true,
       }),
     ]).start(() => {
+      // Remove item from local items array
+      const newItems = items.filter((_, index) => index !== currentIndex);
+      setItems(newItems);
+
       // Reset animations
       translateY.setValue(0);
       opacity.setValue(1);
 
-      if (currentIndex < items.length - 1) {
-        setCurrentIndex(currentIndex + 1);
+      if (currentIndex < newItems.length) {
+        // Stay at same index (which now points to next item)
+        setCurrentIndex(currentIndex);
+      } else if (newItems.length > 0) {
+        // Move to last item
+        setCurrentIndex(newItems.length - 1);
       } else {
+        // No more items, close viewer
         onClose();
       }
     });
@@ -322,11 +352,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
 
   const onHandlerStateChange = (event: any) => {
     if (event.nativeEvent.state === State.END) {
-      // Don't handle gestures while navigating or showing ads
-      if (
-        isNavigating ||
-        InterstitialAdManager.getInstance().isCurrentlyShowing()
-      ) {
+      if (isNavigating) {
         // Reset position if we're in the middle of navigation
         Animated.parallel([
           Animated.spring(translateX, {
@@ -344,30 +370,48 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       const { translationX, translationY, velocityX, velocityY } =
         event.nativeEvent;
 
-      // Check for vertical swipe up (trash)
+      // Check for vertical swipe up (trash) - drag up goes to trash
       if (translationY < -100 || velocityY < -1000) {
         handleTrash();
         return;
       }
 
-      // Check for horizontal swipes (navigation) with improved thresholds
-      const horizontalThreshold = 80; // Reduced from 100 for more responsive swipes
-      const velocityThreshold = 800; // Reduced from 1000 for more responsive swipes
+      // If only one item, show message for horizontal swipes
+      if (items.length === 1) {
+        if (
+          Math.abs(translationX) > 50 ||
+          Math.abs(velocityX) > 500
+        ) {
+          setShowOnlyOneMessage(true);
+          setTimeout(() => setShowOnlyOneMessage(false), 2000);
+        }
+        // Reset position
+        Animated.parallel([
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }),
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+          }),
+        ]).start();
+        return;
+      }
 
-      // For videos, require slightly stronger swipes to avoid accidental navigation
-      const videoMultiplier = currentItem?.type === 'video' ? 1.5 : 1;
-      const adjustedHorizontalThreshold = horizontalThreshold * videoMultiplier;
-      const adjustedVelocityThreshold = velocityThreshold * videoMultiplier;
+      // Check for horizontal swipes (navigation)
+      const horizontalThreshold = 80;
+      const velocityThreshold = 800;
 
       if (
-        translationX > adjustedHorizontalThreshold ||
-        velocityX > adjustedVelocityThreshold
+        translationX > horizontalThreshold ||
+        velocityX > velocityThreshold
       ) {
         // Swipe right - previous image
         handlePrevious();
       } else if (
-        translationX < -adjustedHorizontalThreshold ||
-        velocityX < -adjustedVelocityThreshold
+        translationX < -horizontalThreshold ||
+        velocityX < -velocityThreshold
       ) {
         // Swipe left - next image
         handleNext();
@@ -392,14 +436,28 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   };
 
   if (!currentItem) {
-    return null;
+    return (
+      <View style={styles.container}>
+        <StatusBar hidden />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#fff" />
+        </View>
+      </View>
+    );
   }
 
   return (
     <View style={styles.container}>
       <StatusBar hidden />
 
-      {/* Media Container - Separate from gesture handler for better performance */}
+      {/* Loading Indicator */}
+      {isLoading && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#fff" />
+        </View>
+      )}
+
+      {/* Media Container */}
       <View style={styles.mediaContainer}>
         <TouchableOpacity
           style={styles.mediaTouch}
@@ -467,7 +525,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Gesture Handler Overlay - Enable for all items including videos */}
+      {/* Gesture Handler Overlay */}
       <PanGestureHandler
         onGestureEvent={onGestureEvent}
         onHandlerStateChange={onHandlerStateChange}
@@ -475,29 +533,11 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         <Animated.View style={styles.gestureOverlay} />
       </PanGestureHandler>
 
-      {/* Custom Video Controls */}
-      {currentItem.type === 'video' && showControls && (
-        <View style={styles.videoControlsOverlay}>
-          <TouchableOpacity
-            style={styles.videoControlButton}
-            onPress={() => {
-              const newPausedState = !videoPaused;
-
-              setVideoPaused(newPausedState);
-            }}
-          >
-            <Text style={styles.videoControlIcon}>
-              {videoPaused ? '▶️' : '⏸️'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Only One Image Message */}
+      {/* Only One Item Message */}
       {showOnlyOneMessage && (
         <View style={styles.onlyOneMessageContainer}>
           <Text style={styles.onlyOneMessageText}>
-            ONLY ONE - where you swiping to?
+            Only one - where you swiping to?
           </Text>
         </View>
       )}
@@ -508,26 +548,11 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
           {/* Top Controls */}
           <View style={styles.topControls}>
             <TouchableOpacity
-              onPress={() => {
-                // Call progress callback with number of viewed photos
-                if (onViewProgress) {
-                  onViewProgress(viewedPhotos.size);
-                }
-                onClose();
-              }}
+              onPress={onClose}
               style={styles.closeButton}
             >
               <Text style={styles.closeText}>✕</Text>
             </TouchableOpacity>
-            {/* Counter Display */}
-            <View style={styles.counterContainer}>
-              <Text style={styles.counterText}>
-                {currentIndex + 1} / {items.length}
-              </Text>
-              <Text style={styles.remainingText}>
-                {viewingLimits.remainingViews} views left
-              </Text>
-            </View>
           </View>
 
           {/* Bottom Controls */}
@@ -538,11 +563,24 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
             >
               <Image source={shareIcon} style={styles.controlButtonImage} />
             </TouchableOpacity>
+            {currentItem.type === 'video' && (
+              <TouchableOpacity
+                style={styles.controlButton}
+                onPress={() => {
+                  setVideoPaused(!videoPaused);
+                }}
+              >
+                <Text style={styles.videoControlIcon}>
+                  {videoPaused ? '▶️' : '⏸️'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Gesture Instructions */}
           <View style={styles.instructionsContainer}>
-            <Text style={styles.instructionText}>← → Navigate • ↑ Trash</Text>
+            <Text style={styles.instructionText}>← Swipe →</Text>
+            <Text style={styles.instructionSubText}>↑ Drag up to trash</Text>
           </View>
         </View>
       )}
@@ -559,6 +597,22 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: '#000',
     zIndex: 1000,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1001,
   },
   mediaContainer: {
     flex: 1,
@@ -622,41 +676,25 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
   },
-  counterContainer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-  },
-  counterText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  remainingText: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 12,
-    marginTop: 4,
-  },
   bottomControls: {
     position: 'absolute',
     bottom: 100,
     right: 20,
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
   },
   controlButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 12,
+    marginBottom: 12,
   },
   controlButtonImage: {
-    width: 24,
-    height: 24,
+    width: 48,
+    height: 48,
   },
   instructionsContainer: {
     position: 'absolute',
@@ -667,33 +705,24 @@ const styles = StyleSheet.create({
   },
   instructionText: {
     color: 'rgba(255, 255, 255, 0.95)',
-    fontSize: 33,
+    fontSize: 24,
     fontWeight: 'bold',
     textAlign: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     paddingHorizontal: 24,
-    paddingVertical: 16,
+    paddingVertical: 12,
     borderRadius: 18,
     marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
   },
   instructionSubText: {
     color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     paddingHorizontal: 18,
     paddingVertical: 8,
     borderRadius: 12,
-    marginTop: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
   },
   blockedContainer: {
     flex: 1,
@@ -714,106 +743,17 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textAlign: 'center',
   },
-  blockedText: {
-    fontSize: 18,
-    color: '#fff',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  blockedSubtext: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
   blockedButton: {
     backgroundColor: '#007bff',
     paddingVertical: 12,
     paddingHorizontal: 25,
     borderRadius: 8,
+    marginTop: 20,
   },
   blockedButtonText: {
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
-  },
-  timerText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  premiumContainer: {
-    marginTop: 20,
-    width: '100%',
-    paddingHorizontal: 20,
-  },
-  premiumTitle: {
-    fontSize: 20,
-    color: '#fff',
-    fontWeight: 'bold',
-    marginBottom: 15,
-    textAlign: 'center',
-  },
-  premiumOption: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 15,
-  },
-  premiumOptionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  premiumOptionTitle: {
-    fontSize: 18,
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  premiumOptionPrice: {
-    fontSize: 16,
-    color: '#007bff',
-    fontWeight: 'bold',
-  },
-  premiumOptionDescription: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginBottom: 15,
-  },
-  premiumButton: {
-    backgroundColor: '#007bff',
-    paddingVertical: 12,
-    paddingHorizontal: 25,
-    borderRadius: 8,
-  },
-  premiumButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  onlyOneMessageContainer: {
-    position: 'absolute',
-    top: '50%',
-    left: 20,
-    right: 20,
-    transform: [{ translateY: -25 }],
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1001,
-  },
-  onlyOneMessageText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
   },
   videoErrorContainer: {
     flex: 1,
@@ -855,7 +795,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   videoControlIcon: {
-    fontSize: 24,
+    fontSize: 48,
+  },
+  onlyOneMessageContainer: {
+    position: 'absolute',
+    top: '50%',
+    left: 20,
+    right: 20,
+    transform: [{ translateY: -25 }],
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1001,
+  },
+  onlyOneMessageText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });
 

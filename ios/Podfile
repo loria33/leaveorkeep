@@ -8,6 +8,15 @@ require Pod::Executable.execute_command('node', ['-p',
     )", __dir__]).strip
 end
 
+def permission_setup
+  setup_permissions([
+    'Microphone',
+    'SpeechRecognition',
+    'AppTrackingTransparency',
+    'PhotoLibrary',
+  ])
+end
+
 # Use it to require both react-native's and this package's scripts:
 node_require('react-native/scripts/react_native_pods.rb')
 node_require('react-native-permissions/scripts/setup.rb')
@@ -16,10 +25,7 @@ platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
 # Setup permissions for react-native-permissions
-setup_permissions([
-  'PhotoLibrary',
-  'AppTrackingTransparency',
-])
+permission_setup
 
 linkage = ENV['USE_FRAMEWORKS']
 if linkage != nil

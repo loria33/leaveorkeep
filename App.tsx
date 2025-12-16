@@ -9,6 +9,7 @@ import { request, PERMISSIONS, RESULTS } from 'react-native-permissions';
 // Context
 import { MediaProvider, useMedia } from './src/context/MediaContext';
 import { AdminProvider } from './src/context/adminContext';
+import { triggerHomeTabPress } from './src/context/TabPressContext';
 
 // Screens
 import Onboarding from './src/screens/Onboarding';
@@ -51,6 +52,11 @@ const MainTabs: React.FC = () => {
           tabBarIcon: ({ color, size }) => (
             <Text style={[styles.tabIcon, { color, fontSize: size }]}>🏠</Text>
           ),
+        }}
+        listeners={{
+          tabPress: () => {
+            triggerHomeTabPress();
+          },
         }}
       />
       <Tab.Screen

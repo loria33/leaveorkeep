@@ -10,6 +10,11 @@ export const MEDIA_PERMISSIONS = {
   ],
 };
 
+export const MICROPHONE_PERMISSIONS = {
+  ios: [PERMISSIONS.IOS.MICROPHONE],
+  android: [PERMISSIONS.ANDROID.RECORD_AUDIO],
+};
+
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const debugPermissionState = async (): Promise<void> => {
@@ -75,6 +80,21 @@ export const requestMediaPermissions = async (): Promise<boolean> => {
   }
 };
 
+export const requestMicrophonePermission = async (): Promise<boolean> => {
+  try {
+    if (Platform.OS === 'ios') {
+      const status = await request(PERMISSIONS.IOS.MICROPHONE);
+      return status === RESULTS.GRANTED;
+    } else {
+      const status = await request(PERMISSIONS.ANDROID.RECORD_AUDIO);
+      return status === RESULTS.GRANTED;
+    }
+  } catch (error) {
+    console.log('[Permissions] Error requesting microphone permission:', error);
+    return false;
+  }
+};
+
 export const checkMediaPermissionsWithRetry = async (
   maxRetries: number = 3,
 ): Promise<boolean> => {
@@ -127,6 +147,21 @@ export const checkMediaPermissions = async (): Promise<boolean> => {
     return hasReadPermission;
   } catch (error) {
     console.log('[Permissions] Error in checkMediaPermissions:', error);
+    return false;
+  }
+};
+
+export const checkMicrophonePermission = async (): Promise<boolean> => {
+  try {
+    if (Platform.OS === 'ios') {
+      const status = await check(PERMISSIONS.IOS.MICROPHONE);
+      return status === RESULTS.GRANTED;
+    } else {
+      const status = await check(PERMISSIONS.ANDROID.RECORD_AUDIO);
+      return status === RESULTS.GRANTED;
+    }
+  } catch (error) {
+    console.log('[Permissions] Error checking microphone permission:', error);
     return false;
   }
 };

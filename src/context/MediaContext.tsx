@@ -8,8 +8,21 @@ import React, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { checkMediaPermissionsWithRetry } from '../utils/permissions';
-import { getViewingConfig, hoursToMs } from '../constants/app';
+import { getViewingConfig, getStartOfDay, isToday } from '../constants/app';
 import { ScanProgress, MonthSummary } from '../utils/mediaScanner';
+import {
+  markItemAsViewed,
+  markItemsAsViewed,
+  isItemViewed,
+  isMonthCompleted,
+  checkMonthCompletion,
+  getViewedCount,
+  getViewedPercentage,
+  loadViewedItems,
+  loadCompletedMonths,
+  saveViewedItemsImmediately,
+  getViewingStats,
+} from '../utils/viewedMediaTracker';
 
 export interface MediaItem {
   id: string;
@@ -33,7 +46,7 @@ export interface ViewingLimits {
   lastResetTime: number;
   isBlocked: boolean;
   remainingViews: number;
-  cooldownEndTime?: number;
+  currentDay: number; // Start of current day timestamp
 }
 
 export interface MonthContent {
@@ -112,6 +125,22 @@ export interface MediaContextType {
     viewedMonths: number;
     percentage: number;
   };
+
+  // Viewed media tracking methods
+  markMediaItemAsViewed: (itemId: string) => Promise<void>;
+  markMediaItemsAsViewed: (itemIds: string[]) => Promise<void>;
+  isMediaItemViewed: (itemId: string) => Promise<boolean>;
+  getMonthViewedStats: (monthKey: string) => Promise<{
+    viewedCount: number;
+    totalCount: number;
+    percentage: number;
+    isCompleted: boolean;
+  }>;
+  checkAndMarkMonthCompleted: (monthKey: string) => Promise<boolean>;
+  getViewingStats: () => Promise<{
+    totalViewed: number;
+    completedMonths: number;
+  }>;
 }
 
 const MediaContext = createContext<MediaContextType | undefined>(undefined);
@@ -163,6 +192,7 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     lastResetTime: Date.now(),
     isBlocked: false,
     remainingViews: getViewingConfig().maxViews,
+    currentDay: getStartOfDay(),
   });
 
   // Month tracking state
@@ -173,33 +203,36 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     [monthKey: string]: number;
   }>({});
 
-  // Check and reset viewing limits if cooldown has expired
+  // Viewed media tracking state
+  const [completedMonths, setCompletedMonths] = useState<Set<string>>(
+    new Set(),
+  );
+
+  // Check and reset viewing limits if it's a new day
   useEffect(() => {
-    const checkCooldown = () => {
-      if (
-        viewingLimits.cooldownEndTime &&
-        Date.now() >= viewingLimits.cooldownEndTime
-      ) {
+    const checkDailyReset = () => {
+      const today = getStartOfDay();
+      if (viewingLimits.currentDay !== today) {
         const { maxViews } = getViewingConfig();
         const resetLimits = {
           viewCount: 0,
           lastResetTime: Date.now(),
           isBlocked: false,
           remainingViews: maxViews,
+          currentDay: today,
         };
         setViewingLimits(resetLimits);
         saveViewingLimitsToStorage(resetLimits);
       }
     };
 
-    // Check immediately when component mounts or when stored limits are loaded
-    if (viewingLimits.cooldownEndTime) {
-      checkCooldown();
-    }
+    // Check immediately when component mounts
+    checkDailyReset();
 
-    const interval = setInterval(checkCooldown, 60000); // Check every minute
+    // Check every minute to see if it's a new day
+    const interval = setInterval(checkDailyReset, 60000);
     return () => clearInterval(interval);
-  }, [viewingLimits.cooldownEndTime]);
+  }, [viewingLimits.currentDay]);
 
   // Simplified grouped media - only from loaded month content
   const groupedMedia = React.useMemo(() => {
@@ -227,7 +260,22 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   // Load persisted data on app start
   useEffect(() => {
     loadPersistedData();
+    loadViewedMediaData();
   }, []);
+
+  // Load viewed media tracking data
+  const loadViewedMediaData = async () => {
+    try {
+      const [viewedItems, completed] = await Promise.all([
+        loadViewedItems(),
+        loadCompletedMonths(),
+      ]);
+      setCompletedMonths(completed);
+      // Cache is now loaded in the utility module
+    } catch (error) {
+      console.log('Error loading viewed media data:', error);
+    }
+  };
 
   // Save trash to storage whenever it changes
   useEffect(() => {
@@ -288,20 +336,22 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
 
       if (storedViewingLimits) {
         const limits = JSON.parse(storedViewingLimits);
+        const today = getStartOfDay();
 
-        // Check if cooldown has expired since app was closed
-        if (limits.cooldownEndTime && Date.now() >= limits.cooldownEndTime) {
+        // Check if it's a new day since app was closed
+        if (!limits.currentDay || limits.currentDay !== today) {
           const { maxViews } = getViewingConfig();
           const resetLimits = {
             viewCount: 0,
             lastResetTime: Date.now(),
             isBlocked: false,
             remainingViews: maxViews,
+            currentDay: today,
           };
           setViewingLimits(resetLimits);
           saveViewingLimitsToStorage(resetLimits);
         } else {
-          // Cooldown still active, load stored limits
+          // Same day, load stored limits
           setViewingLimits(limits);
         }
       }
@@ -608,27 +658,21 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   };
 
   const canViewMedia = () => {
-    const { viewCount, isBlocked, cooldownEndTime } = viewingLimits;
-    if (isBlocked && cooldownEndTime && Date.now() < cooldownEndTime) {
-      return false;
-    }
+    const { viewCount } = viewingLimits;
     return viewCount < getViewingConfig().maxViews;
   };
 
   const incrementViewCount = () => {
-    const { maxViews, cooldownHours } = getViewingConfig();
+    const { maxViews } = getViewingConfig();
     const newViewCount = viewingLimits.viewCount + 1;
     const isBlocked = newViewCount >= maxViews;
-    const cooldownEndTime = isBlocked
-      ? Date.now() + hoursToMs(cooldownHours)
-      : undefined;
 
     const newLimits = {
       viewCount: newViewCount,
       lastResetTime: Date.now(),
       isBlocked,
       remainingViews: isBlocked ? 0 : maxViews - newViewCount,
-      cooldownEndTime,
+      currentDay: viewingLimits.currentDay,
     };
 
     setViewingLimits(newLimits);
@@ -636,11 +680,9 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   };
 
   const getRemainingCooldownTime = () => {
-    const { cooldownEndTime } = viewingLimits;
-    if (!cooldownEndTime) {
-      return 0;
-    }
-    const remaining = cooldownEndTime - Date.now();
+    const today = getStartOfDay();
+    const tomorrow = today + 24 * 60 * 60 * 1000; // Next day at midnight
+    const remaining = tomorrow - Date.now();
     return Math.max(0, remaining);
   };
 
@@ -707,6 +749,152 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
       viewedMonths: viewedMonthsCount,
       percentage,
     };
+  };
+
+  // Viewed media tracking methods
+  const markMediaItemAsViewedMethod = async (itemId: string) => {
+    await markItemAsViewed(itemId);
+  };
+
+  const markMediaItemsAsViewedMethod = async (itemIds: string[]) => {
+    await markItemsAsViewed(itemIds);
+  };
+
+  const isMediaItemViewedMethod = async (itemId: string): Promise<boolean> => {
+    return await isItemViewed(itemId);
+  };
+
+  const getMonthViewedStatsMethod = async (
+    monthKey: string,
+  ): Promise<{
+    viewedCount: number;
+    totalCount: number;
+    percentage: number;
+    isCompleted: boolean;
+  }> => {
+    // Get total count from month summary (persistent, not dependent on loaded items)
+    const summary = monthSummaries.find(m => m.monthKey === monthKey);
+    const totalCountFromSummary = summary?.totalCount || 0;
+
+    // Try to get all items to count viewed items accurately
+    let allMonthItems: MediaItem[] = [];
+    try {
+      const { fetchMonthPhotosNative } = await import('../native/PhotoMonths');
+      let offset = 0;
+      const batchSize = 1000;
+      let hasMore = true;
+
+      while (hasMore && offset < 10000) {
+        const batch = await fetchMonthPhotosNative(monthKey, offset, batchSize);
+        if (batch && batch.length > 0) {
+          allMonthItems.push(...batch);
+          offset += batch.length;
+          hasMore = batch.length === batchSize;
+        } else {
+          hasMore = false;
+        }
+      }
+    } catch (error) {
+      // Fallback to loaded items if native fails
+      allMonthItems = getMonthItems(monthKey);
+    }
+
+    // If we couldn't get items, use loaded items as fallback
+    if (allMonthItems.length === 0) {
+      allMonthItems = getMonthItems(monthKey);
+    }
+
+    // Use summary totalCount if available, otherwise use actual items found
+    // This ensures we have a persistent total count even if items aren't loaded
+    const totalCount = totalCountFromSummary > 0 
+      ? totalCountFromSummary 
+      : allMonthItems.length;
+    
+    // Count viewed items from the items we have
+    const viewedCount = await getViewedCount(allMonthItems);
+    
+    // If we have a summary total but fewer items loaded, we can't know exact viewed count
+    // But we can estimate based on what we have
+    const percentage = totalCount > 0 
+      ? Math.round((viewedCount / totalCount) * 100) 
+      : 0;
+    const isCompleted = await isMonthCompleted(monthKey);
+
+    return {
+      viewedCount,
+      totalCount,
+      percentage,
+      isCompleted,
+    };
+  };
+
+  const checkAndMarkMonthCompletedMethod = async (
+    monthKey: string,
+  ): Promise<boolean> => {
+    try {
+      // Load ALL items for the month to check completion properly
+      // Use native module to get all items, not just loaded ones
+      const { fetchMonthPhotosNative } = await import('../native/PhotoMonths');
+      
+      // Fetch a large number of items (enough to cover most months)
+      let allMonthItems: MediaItem[] = [];
+      let offset = 0;
+      const batchSize = 1000;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const batch = await fetchMonthPhotosNative(monthKey, offset, batchSize);
+        
+        if (batch && batch.length > 0) {
+          allMonthItems.push(...batch);
+          offset += batch.length;
+          hasMore = batch.length === batchSize;
+        } else {
+          hasMore = false;
+        }
+        
+        // Safety limit to prevent infinite loops
+        if (offset > 10000) {
+          break;
+        }
+      }
+      
+      // If we couldn't get all items via native, fall back to loaded items
+      if (allMonthItems.length === 0) {
+        const loadedItems = getMonthItems(monthKey);
+        if (loadedItems.length > 0) {
+          console.log(`⚠️ ${monthKey}: Native returned 0 items, using ${loadedItems.length} loaded items`);
+          allMonthItems = loadedItems;
+        } else {
+          console.log(`⚠️ ${monthKey}: No items available from native or loaded items`);
+        }
+      } else {
+        console.log(`📦 ${monthKey}: Fetched ${allMonthItems.length} items from native`);
+      }
+      
+      const isCompleted = await checkMonthCompletion(monthKey, allMonthItems);
+      
+      if (isCompleted) {
+        setCompletedMonths(prev => new Set(prev).add(monthKey));
+      }
+      
+      return isCompleted;
+    } catch (error) {
+      console.log(`❌ Error checking ${monthKey}:`, error);
+      // Fallback to loaded items if native module fails
+      const monthItems = getMonthItems(monthKey);
+      const isCompleted = await checkMonthCompletion(monthKey, monthItems);
+      
+      if (isCompleted) {
+        setCompletedMonths(prev => new Set(prev).add(monthKey));
+      }
+      
+      return isCompleted;
+    }
+  };
+
+  const getViewingStatsMethod = async () => {
+    return await getViewingStats();
   };
 
   // Calculate month progress
@@ -841,6 +1029,14 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     monthProgress,
     markMonthAsViewed,
     getMonthProgress,
+
+    // Viewed media tracking
+    markMediaItemAsViewed: markMediaItemAsViewedMethod,
+    markMediaItemsAsViewed: markMediaItemsAsViewedMethod,
+    isMediaItemViewed: isMediaItemViewedMethod,
+    getMonthViewedStats: getMonthViewedStatsMethod,
+    checkAndMarkMonthCompleted: checkAndMarkMonthCompletedMethod,
+    getViewingStats: getViewingStatsMethod,
   };
 
   return (

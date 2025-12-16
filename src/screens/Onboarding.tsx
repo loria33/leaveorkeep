@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
   Linking,
   Image,
   Animated,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
@@ -19,16 +21,326 @@ import { useMedia } from '../context/MediaContext';
 import {
   requestMediaPermissions,
   checkMediaPermissionsWithRetry,
+  requestMicrophonePermission,
 } from '../utils/permissions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+// NEW: add these imports
+import RNFS from 'react-native-fs';
+import NetInfo from '@react-native-community/netinfo';
+import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions';
+import { APP_CONFIG } from '../constants/app'; // make sure path matches your project
+
 const { width, height } = Dimensions.get('window');
 
-// Responsive calculations based on screen height
+// --- minimal rotating phrase list (first three only) ---
+
+const PHRASES = [
+  'Grabbing a fresh notebook',
+  'Unpacking digital suitcases',
+  'Fluffing the data pillows',
+  'Mixing bits and bytes',
+  'Sipping virtual lemonade',
+  'Organizing our toolbox',
+  'Polishing the code gears',
+  'Syncing friendly vibes',
+  'Stirring the logic soup',
+  'Counting happy photons',
+  'Stretching neural muscles',
+  'Heating up inspiration',
+  'Sharpening pencils of thought',
+  'Aligning tiny magnets',
+  'Loading gentle whispers',
+  'Collecting cozy moments',
+  'Dusting off metadata',
+  'Filling jars with ideas',
+  'Painting pixels calmly',
+  'Humming a hopeful tune',
+  'Tuning the memory strings',
+  'Planting seeds of knowledge',
+  'Tickling the algorithm',
+  'Checking compass bearings',
+  'Straightening virtual frames',
+  'Flipping through storybooks',
+  'Brewing a calm breeze',
+  'Gathering morning sunshine',
+  'Building paper airplanes',
+  'Stacking rainbow blocks',
+  'Sorting candy-colored bytes',
+  'Smoothing silk threads',
+  'Tracing friendly footprints',
+  'Popping bubble wrap of joy',
+  'Charting starlit maps',
+  'Holding doors for packets',
+  'Rolling out welcome mats',
+  'Measuring teaspoons of code',
+  'Setting up campfires',
+  'Ordering extra sprinkles',
+  'Calibrating curiosity meters',
+  'Baking binary cupcakes',
+  'Folding origami cranes',
+  'Teaching zeros to dance',
+  'Untangling headphone cords',
+  'Watering pixel plants',
+  'Polishing friendly robots',
+  'Fanning creative sparks',
+  'Catching cloud daydreams',
+  'Wrapping ideas in bows',
+  'Lining up shiny marbles',
+  'Refilling positivity jars',
+  'Adjusting comfy armchairs',
+  'Writing upbeat postcards',
+  'Bundling fresh insights',
+  'Whistling while we work',
+  'Inflating imagination balloons',
+  'Adding glitter to graphs',
+  'Organizing sticker albums',
+  'Labeling treasure chests',
+  'Herding playful kittens',
+  'Filling sails with breeze',
+  'Lighting lanterns of hope',
+  'Planting window gardens',
+  'Sewing quilted patterns',
+  'Skipping stones of thought',
+  'Mapping secret passages',
+  'Placing bookmarks gently',
+  'Gifting virtual high‑fives',
+  'Composing warm melodies',
+  'Harvesting idea berries',
+  'Bouncing rubber duckies',
+  'Pressing subtle pause',
+  'Sweeping porch steps',
+  'Recharging kindness batteries',
+  'Stacking library books',
+  'Sorting postcards by color',
+  'Arranging puzzle pieces',
+  'Flipping pancakes of code',
+  'Carving wooden whistles',
+  'Spinning tiny windmills',
+  'Plaiting friendship bracelets',
+  'Wrapping up loose ends',
+  'Coloring inside lines',
+  'Collecting lost buttons',
+  'Sanding smooth surfaces',
+  'Gluing googly eyes',
+  'Mapping rainbow arcs',
+  'Selecting comfy pillows',
+  'Baking cinnamon smiles',
+  'Snapping happy photos',
+  'Beaming friendly signals',
+  'Raking autumn leaves',
+  'Drawing chalk doodles',
+  'Sniffing fresh bread',
+  'Hanging string lights',
+  'Pruning bonsai trees',
+  'Picking blueberries',
+  'Stocking lemonade stand',
+  'Opening storybook gates',
+  'Crocheting cozy scarves',
+  'Lighting birthday candles',
+  'Filling piñatas with laughs',
+  'Turning pages softly',
+  'Kneading pizza dough',
+  'Skipping rope rhythms',
+  'Floating paper boats',
+  'Blowing cotton clouds',
+  'Catching ladybugs',
+  'Balancing smooth stones',
+  'Tracing shooting stars',
+  'Pouring honey thoughts',
+  'Splashing paint playfully',
+  'Juggling colorful scarves',
+  'Tuning toy ukuleles',
+  'Counting fireflies',
+  'Flipping calendar pages',
+  'Folding paper hearts',
+  'Gathering seashells',
+  'Sipping cocoa carefully',
+  'Threading magic beads',
+  'Sharing umbrella shade',
+  'Baking gingerbread code',
+  'Combing sandy beaches',
+  'Installing happy updates',
+  'Refining sunrise gradients',
+  'Filling bird feeders',
+  'Tossing confetti gently',
+  'Spreading picnic blankets',
+  'Lighting sparklers',
+  'Whittling soft whistles',
+  'Grazing fluffy clouds',
+  'Cherishing warm mittens',
+  'Scaling candy mountains',
+  'Scooping ice cream bytes',
+  'Paddling calm rivers',
+  'Capturing moonbeams',
+  'Applying gentle polish',
+  'Bundling starlight packets',
+  'Creating chalk rainbows',
+  'Stringing popcorn garlands',
+  'Pressing flower petals',
+  'Clipping paper coupons',
+  'Spooling cotton reels',
+  'Braiding bright ribbons',
+  'Planting story seeds',
+  'Surfing easy breezes',
+  'Drizzling caramel thoughts',
+  'Whisking marshmallow fluff',
+  'Squeezing citrus smiles',
+  'Placing stepping stones',
+  'Rolling snowball ideas',
+  'Carving pumpkin grins',
+  'Frothing latte letters',
+  'Waving friendly pennants',
+  'Twirling maple leaves',
+  'Opening treasure maps',
+  'Unfolding paper fans',
+  'Arranging pebbled paths',
+  'Fueling rocket dreams',
+  'Sweeping stargazer decks',
+  'Curing stage jitters',
+  'Refilling ink wells',
+  'Sculpting sandcastles',
+  'Aligning domino trails',
+  'Stacking waffle towers',
+  'Listening for echoes',
+  'Twisting balloon animals',
+  'Drawing treasure X',
+  'Cleaning kaleidoscopes',
+  'Stacking card houses',
+  'Sketching gentle swirls',
+  'Clicking castanets softly',
+  'Launching kite strings',
+  'Meandering garden paths',
+  'Penciling soft outlines',
+  'Tracing gentle curves',
+  'Seeding galaxy gardens',
+  'Ticking pocket watches',
+  'Tuning wind chimes',
+  'Prepping snow‑cone syrup',
+  'Spreading warm butter',
+  'Gathering dandelion fluff',
+  'Feathering nest pillows',
+  'Hanging paper lanterns',
+  'Arranging sunflower bouquets',
+  'Mending patchwork quilts',
+  'Gilding picture frames',
+  'Smoothing beach towels',
+  'Gathering pinecones',
+  'Copying soft lullabies',
+  'Buttoning cozy coats',
+  'Splashing puddles lightly',
+  'Wrapping winter scarves',
+  'Threading popcorn chains',
+  'Arranging tea biscuits',
+  'Catching morning dew',
+  'Stretching rainbow bridges',
+  'Lining cupcake pans',
+  'Knotting friendship cords',
+  'Quieting library whispers',
+  'Muffling snow footsteps',
+  'Doodling sunny faces',
+  'Updating kindness logs',
+  'Lighting porch lanterns',
+  'Weaving hammock ropes',
+  'Stringing fairy lights',
+  'Canning sweet preserves',
+  'Stamping travel passports',
+  'Refilling soap bubbles',
+  'Cruising gentle waves',
+  'Pairing mismatched socks',
+  'Clipping garden herbs',
+  'Coiling jump ropes',
+  'Arranging chess pieces',
+  'Flipping storytime tabs',
+  'Porting picnic baskets',
+  'Inflating beach balls',
+  'Measuring tiny footprints',
+  'Hammering toy nails',
+  'Guiding paper airplanes',
+  'Tracing gentle ripples',
+  'Frosting birthday cakes',
+  'Mirroring moonlit ponds',
+  'Drifting cotton swirls',
+  'Sprinkling powdered sugar',
+  'Ringing bicycle bells',
+  'Floating feather wishes',
+  'Thawing frozen smiles',
+  'Collecting lucky pennies',
+  'Aligning stepping stools',
+  'Kicking autumn acorns',
+  'Whirling pinwheels',
+  'Rhyming silly poems',
+  'Sprouting bean sprouts',
+  'Lacing sneaker strings',
+  'Nesting tiny sparrows',
+  'Chalking hopscotch squares',
+  'Bundling yarn skeins',
+  'Jotting sweet doodles',
+  'Hopping pebble trails',
+  'Stitching secret pockets',
+  'Backspacing typos',
+  'Holding golden bookmarks',
+  'Cheering gentle victories',
+  'Rinsing paintbrush tips',
+  'Fanning paper notes',
+  'Flipping library tabs',
+  'Sailing gentle breezes',
+  'Counting soft heartbeats',
+  'Peeling citrus slices',
+  'Threading soft melodies',
+  'Balancing toy blocks',
+  'Lulling sleepy dragons',
+  'Nibbling ginger snaps',
+  'Polishing marble tops',
+  'Harvesting honeycomb',
+  'Whispering bedtime tales',
+  'Hugging teddy bears',
+  'Catching soap bubbles',
+  'Stirring cocoa swirls',
+  'Ticking gentle timers',
+  'Collecting star stickers',
+  'Floating dandelion seeds',
+  'Juggling soft pillows',
+  'Stacking donut rings',
+  'Planting lily bulbs',
+  'Kissing boo‑boos better',
+  'Guarding secret gardens',
+  'Reeling kite spools',
+  'Guiding gentle raindrops',
+  'Seasoning noodle soups',
+  'Arranging pastel crayons',
+  'Singing shower songs',
+  'Feeding rubber ducks',
+  'Blending berry smoothies',
+  'Folding pajamas neatly',
+  'Cropping photo corners',
+];
+
+const PHRASE_COLORS = [
+  '#FF6B6B', // Red
+  '#4ECDC4', // Teal
+  '#FFD93D', // Yellow
+  '#1A535C', // Dark teal
+  '#FFB6B9', // Pink
+  '#6A89CC', // Blue
+  '#38ADA9', // Green
+  '#F8A5C2', // Light pink
+  '#60A3D9', // Sky blue
+  '#F6D365', // Light yellow
+  '#B8E994', // Light green
+  '#F3A683', // Orange
+  '#786FA6', // Purple
+  '#574B90', // Deep purple
+  '#3DC1D3', // Cyan
+  '#E17055', // Coral
+  '#00B894', // Emerald
+  '#00B8D4', // Bright blue
+  '#F9CA24', // Gold
+  '#EA8685', // Soft red
+];
+
 const isSmallScreen = height < 700;
 const isMediumScreen = height >= 700 && height < 800;
-const isLargeScreen = height >= 800;
-
 const getResponsiveSize = (small: number, medium: number, large: number) => {
   if (isSmallScreen) return small;
   if (isMediumScreen) return medium;
@@ -36,7 +348,6 @@ const getResponsiveSize = (small: number, medium: number, large: number) => {
 };
 
 const responsiveValues = {
-  // Vertical spacing
   topPadding: getResponsiveSize(height * 0.03, height * 0.05, height * 0.06),
   bottomPadding: getResponsiveSize(height * 0.03, height * 0.04, height * 0.05),
   progressMargin: getResponsiveSize(
@@ -44,26 +355,21 @@ const responsiveValues = {
     height * 0.05,
     height * 0.06,
   ),
-
-  // Icon and text sizes
   iconSize: getResponsiveSize(60, 70, 80),
   titleSize: getResponsiveSize(24, 26, 28),
   subtitleSize: getResponsiveSize(16, 17, 18),
   descriptionSize: getResponsiveSize(14, 15, 16),
-
-  // Content spacing
   iconMargin: getResponsiveSize(height * 0.02, height * 0.03, height * 0.04),
   titleMargin: getResponsiveSize(8, 10, 12),
   subtitleMargin: getResponsiveSize(12, 16, 20),
-
-  // Button sizing
   buttonPadding: getResponsiveSize(10, 12, 14),
   buttonText: getResponsiveSize(14, 15, 16),
 };
 
+// ⚠️ We inserted two new steps: Whisper download & Microphone permission
 const onboardingSteps = [
   {
-    title: 'Welcome to LeaveMKeepM! 🎉',
+    title: 'Welcome to KeepFlick! 🎉',
     subtitle: 'Your smart media cleanup companion',
     description:
       'Transform your cluttered photo gallery into a organized masterpiece. Clean up your memories with style!',
@@ -89,6 +395,23 @@ const onboardingSteps = [
     description:
       'Before we can help organize your photos, please review our privacy policy and usage agreement.',
     icon: '📋',
+  },
+  // NEW STEP (Whisper download)
+  {
+    type: 'whisper_download',
+    title: 'Download Transcription Model',
+    subtitle: 'Enables on-device voice-to-text',
+    description: '',
+    icon: '🎤',
+  },
+  // NEW STEP (Microphone permission)
+  {
+    type: 'microphone_permission',
+    title: 'Microphone Permission',
+    subtitle: 'Required for voice transcription',
+    description:
+      'We only use the mic locally on your device for voice-to-text. Nothing is uploaded.',
+    icon: '🎙️',
   },
   {
     type: 'interactive_swipe',
@@ -160,21 +483,8 @@ const Onboarding: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
-  const [swipeProgress, setSwipeProgress] = useState({
-    left: false,
-    right: false,
-    up: false,
-  });
-  const [currentSwipePhase, setCurrentSwipePhase] = useState<
-    'left' | 'right' | 'up'
-  >('left');
 
-  // Animated values for image movement
-  const translateX = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(0)).current;
-  const imageOpacity = useRef(new Animated.Value(1)).current;
-
-  // For interactive swipe step
+  // Interactive swipe state (unchanged)
   const [swipePhase, setSwipePhase] = useState<'right' | 'left' | 'up'>(
     'right',
   );
@@ -184,48 +494,57 @@ const Onboarding: React.FC = () => {
   const { setHasPermission, setOnboardingComplete, scanMedia } = useMedia();
   const insets = useSafeAreaInsets();
 
+  // --- NEW: whisper download state ---
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const lastProgressUpdate = useRef(Date.now());
+  const [currentPhrase, setCurrentPhrase] = useState(
+    PHRASES[Math.floor(Math.random() * PHRASES.length)],
+  );
+  const phraseIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (isDownloading) {
+      phraseIntervalRef.current = setInterval(() => {
+        setCurrentPhrase(PHRASES[Math.floor(Math.random() * PHRASES.length)]);
+      }, 5000);
+    } else {
+      if (phraseIntervalRef.current) {
+        clearInterval(phraseIntervalRef.current);
+        phraseIntervalRef.current = null;
+      }
+    }
+    return () => {
+      if (phraseIntervalRef.current) {
+        clearInterval(phraseIntervalRef.current);
+        phraseIntervalRef.current = null;
+      }
+    };
+  }, [isDownloading]);
+
+  // --- handlers: step navigation ---
   const handleNext = () => {
+    const stepDef = onboardingSteps[currentStep];
+
+    // Route special steps
+    if (stepDef?.type === 'whisper_download') {
+      startWhisperDownload();
+      return;
+    }
+    if (stepDef?.type === 'microphone_permission') {
+      handleMicrophonePermission();
+      return;
+    }
+
     if (currentStep < onboardingSteps.length - 1) {
       setCurrentStep(currentStep + 1);
-      // Reset scroll state when moving to privacy step
-      if (currentStep === 3) {
-        // Privacy step
-        setHasScrolledToBottom(false);
-      }
-      // Reset swipe progress when moving to interactive step
-      if (currentStep === 4) {
-        // Interactive swipe step
-        setSwipeProgress({ left: false, right: false, up: false });
-        setCurrentSwipePhase('left');
-        translateX.setValue(0);
-        translateY.setValue(0);
-        imageOpacity.setValue(1);
-      }
+      if (currentStep === 3) setHasScrolledToBottom(false); // reset after privacy step
     } else {
-      handlePermissionRequest();
+      handlePermissionRequest(); // media library permission (existing final step)
     }
   };
 
-  // Helper to go to next swipe phase or onboarding step
-  const goToNextSwipePhase = () => {
-    if (swipePhase === 'right') {
-      setSwipePhase('left');
-      setLogoVisible(true);
-      logoOpacity.setValue(1);
-    } else if (swipePhase === 'left') {
-      setSwipePhase('up');
-      setLogoVisible(true);
-      logoOpacity.setValue(1);
-    } else {
-      // Finished all phases, go to next onboarding step
-      setCurrentStep(currentStep + 1);
-      setSwipePhase('right');
-      setLogoVisible(true);
-      logoOpacity.setValue(1);
-    }
-  };
-
-  // Helper to go to previous swipe phase or onboarding step
+  // --- SWIPE helpers (unchanged logic) ---
   const goToPrevSwipePhase = () => {
     if (swipePhase === 'left') {
       setSwipePhase('right');
@@ -236,78 +555,65 @@ const Onboarding: React.FC = () => {
       setLogoVisible(true);
       logoOpacity.setValue(1);
     } else {
-      // Go to previous onboarding step
       setCurrentStep(currentStep - 1);
       setSwipePhase('right');
       setLogoVisible(true);
       logoOpacity.setValue(1);
     }
   };
-
-  // Handler for skip button
   const handleSkipSwipe = () => {
     setCurrentStep(currentStep + 1);
     setSwipePhase('right');
     setLogoVisible(true);
     logoOpacity.setValue(1);
   };
-
-  // Handler for swipe gesture
   const handleSwipeGesture = (event: any) => {
-    if (currentStep !== 4 || !logoVisible) return;
+    if (
+      currentStep !==
+        onboardingSteps.findIndex(s => s.type === 'interactive_swipe') ||
+      !logoVisible
+    )
+      return;
     if (event.nativeEvent.state !== State.END) return;
     const { translationX, translationY, velocityX, velocityY } =
       event.nativeEvent;
-    if (swipePhase === 'right') {
-      if (translationX > 100 || velocityX > 1000) {
-        Animated.timing(logoOpacity, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }).start(() => {
-          setLogoVisible(false);
-          setTimeout(goToNextSwipePhase, 200);
-        });
-      }
-    } else if (swipePhase === 'left') {
-      if (translationX < -100 || velocityX < -1000) {
-        Animated.timing(logoOpacity, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }).start(() => {
-          setLogoVisible(false);
-          setTimeout(goToNextSwipePhase, 200);
-        });
-      }
-    } else if (swipePhase === 'up') {
-      if (translationY < -100 || velocityY < -1000) {
-        Animated.timing(logoOpacity, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }).start(() => {
-          setLogoVisible(false);
-          setTimeout(goToNextSwipePhase, 200);
-        });
-      }
-    }
+    const goNextPhase = () => {
+      Animated.timing(logoOpacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => {
+        setLogoVisible(false);
+        setTimeout(() => {
+          if (swipePhase === 'right') setSwipePhase('left');
+          else if (swipePhase === 'left') setSwipePhase('up');
+          else {
+            setCurrentStep(currentStep + 1);
+            setSwipePhase('right');
+          }
+          setLogoVisible(true);
+          logoOpacity.setValue(1);
+        }, 200);
+      });
+    };
+    if (swipePhase === 'right' && (translationX > 100 || velocityX > 1000))
+      goNextPhase();
+    if (swipePhase === 'left' && (translationX < -100 || velocityX < -1000))
+      goNextPhase();
+    if (swipePhase === 'up' && (translationY < -100 || velocityY < -1000))
+      goNextPhase();
   };
 
+  // --- media (photos) permission step (existing) ---
   const handlePermissionRequest = async () => {
     setIsRequestingPermission(true);
     try {
-      // Only use react-native-permissions logic
       const hasPermission = await requestMediaPermissions();
-
       if (hasPermission) {
         await completeOnboarding();
       } else {
-        // If permission request failed, try checking again with retry logic
-        // This handles cases where permission was granted but not detected
-        const recheckPermission = await checkMediaPermissionsWithRetry();
-
-        if (recheckPermission) {
+        const recheck = await checkMediaPermissionsWithRetry();
+        if (recheck) {
           await completeOnboarding();
         } else {
           Alert.alert(
@@ -315,32 +621,20 @@ const Onboarding: React.FC = () => {
             'We need access to your photos to help organize them. Please enable permissions in your device settings.',
             [
               { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Open Settings',
-                onPress: handleOpenSettings,
-              },
-              {
-                text: 'Try Again',
-                onPress: handlePermissionRequest,
-              },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              { text: 'Try Again', onPress: handlePermissionRequest },
             ],
           );
         }
       }
-    } catch (error) {
+    } catch {
       Alert.alert(
         'Permission Error',
         'There was an issue requesting permissions. Please try again or check your device settings.',
         [
           { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Try Again',
-            onPress: handlePermissionRequest,
-          },
-          {
-            text: 'Open Settings',
-            onPress: handleOpenSettings,
-          },
+          { text: 'Try Again', onPress: handlePermissionRequest },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
         ],
       );
     } finally {
@@ -348,36 +642,11 @@ const Onboarding: React.FC = () => {
     }
   };
 
-  const handleOpenSettings = () => {
-    Linking.openSettings();
-  };
-
   const completeOnboarding = async () => {
     setHasPermission(true);
     setOnboardingComplete(true);
-
-    // Small delay to ensure state changes are processed properly on iPad
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Start scanning media in the background
+    await new Promise(r => setTimeout(r, 500));
     scanMedia();
-  };
-
-  const handleGetStarted = async () => {
-    try {
-      const granted = await requestMediaPermissions();
-      if (granted) {
-        await completeOnboarding();
-      } else {
-        // Try again with retry logic
-        const recheckPermission = await checkMediaPermissionsWithRetry();
-        if (recheckPermission) {
-          await completeOnboarding();
-        }
-      }
-    } catch (error) {
-      // Error requesting permissions
-    }
   };
 
   const handleScroll = (event: any) => {
@@ -386,42 +655,129 @@ const Onboarding: React.FC = () => {
     const isCloseToBottom =
       layoutMeasurement.height + contentOffset.y >=
       contentSize.height - paddingToBottom;
+    if (isCloseToBottom && !hasScrolledToBottom) setHasScrolledToBottom(true);
+  };
 
-    if (isCloseToBottom && !hasScrolledToBottom) {
-      setHasScrolledToBottom(true);
+  // --- NEW: Whisper download implementation ---
+  const startWhisperDownload = async () => {
+    try {
+      const net = await NetInfo.fetch();
+      const onWifi = net.type === 'wifi' && net.isConnected;
+      const proceed = async () => {
+        setIsDownloading(true);
+        setDownloadProgress(0);
+        const fromUrl = APP_CONFIG.getWhisperModelUrl();
+        const fileName = APP_CONFIG.getWhisperModelFileName();
+        const localPath = `${RNFS.DocumentDirectoryPath}/${fileName}`;
+
+        const exists = await RNFS.exists(localPath);
+        if (!exists) {
+          const job = RNFS.downloadFile({
+            fromUrl,
+            toFile: localPath,
+            progress: res => {
+              const now = Date.now();
+              if (now - lastProgressUpdate.current > 100) {
+                if (res.contentLength && res.bytesWritten) {
+                  setDownloadProgress(
+                    (res.bytesWritten / res.contentLength) * 100,
+                  );
+                }
+                lastProgressUpdate.current = now;
+              }
+            },
+            progressDivider: 1,
+            headers: { 'User-Agent': 'KeepFlick/1.0' },
+          });
+          await job.promise;
+        } else {
+          setDownloadProgress(100);
+        }
+
+        setIsDownloading(false);
+        setDownloadProgress(100);
+        setCurrentStep(currentStep + 1);
+      };
+
+      if (!onWifi) {
+        Alert.alert(
+          'Mobile Data Warning',
+          'You are not on Wi-Fi. Downloading the Whisper model (~190MB) may incur carrier charges. Continue?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Download Anyway', onPress: proceed },
+          ],
+        );
+      } else {
+        await proceed();
+      }
+    } catch (e) {
+      setIsDownloading(false);
+      setDownloadProgress(0);
+      Alert.alert(
+        'Download Error',
+        'Failed to download the Whisper model. Please try again.',
+      );
+    }
+  };
+
+  // --- NEW: Microphone permission implementation ---
+  const handleMicrophonePermission = async () => {
+    try {
+      const hasPermission = await requestMicrophonePermission();
+      if (hasPermission) {
+        setCurrentStep(currentStep + 1);
+      } else {
+        Alert.alert(
+          'Microphone Permission',
+          'You can enable microphone access later in Settings.',
+          [
+            {
+              text: 'Continue Anyway',
+              onPress: () => setCurrentStep(currentStep + 1),
+            },
+          ],
+        );
+      }
+    } catch {
+      Alert.alert(
+        'Permission Error',
+        'Failed to request microphone permission.',
+        [
+          {
+            text: 'Continue Anyway',
+            onPress: () => setCurrentStep(currentStep + 1),
+          },
+        ],
+      );
     }
   };
 
   const step = onboardingSteps[currentStep];
 
-  // Render privacy agreement step
+  // --- Render Privacy step (unchanged) ---
   if (currentStep === 3) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" />
         <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
           <View style={styles.privacyContainer}>
-            {/* Header */}
             <View style={styles.privacyHeader}>
               <Text style={styles.icon}>{step.icon}</Text>
               <Text style={styles.title}>{step.title}</Text>
               <Text style={styles.subtitle}>{step.subtitle}</Text>
             </View>
-
-            {/* Agreement Text */}
             <View style={styles.agreementContainer}>
               <ScrollView
                 style={styles.agreementScroll}
                 contentContainerStyle={styles.agreementContent}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
-                showsVerticalScrollIndicator={true}
+                showsVerticalScrollIndicator
               >
                 <Text style={styles.agreementText}>{privacyAgreementText}</Text>
               </ScrollView>
             </View>
-
-            {/* Bottom Actions */}
             <View
               style={[
                 styles.bottomContainer,
@@ -434,7 +790,6 @@ const Onboarding: React.FC = () => {
               >
                 <Text style={styles.backButtonText}>Back</Text>
               </TouchableOpacity>
-
               <TouchableOpacity
                 style={[
                   styles.nextButton,
@@ -459,9 +814,148 @@ const Onboarding: React.FC = () => {
     );
   }
 
-  // Render interactive swipe step
-  if (currentStep === 4) {
-    // Labels and icons for each phase
+  // --- NEW: Render Whisper Download step ---
+  if (step?.type === 'whisper_download') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            bounces={false}
+          >
+            <View style={styles.progressContainer}>
+              {onboardingSteps.map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.progressDot,
+                    index <= currentStep && styles.activeProgressDot,
+                  ]}
+                />
+              ))}
+            </View>
+
+            <View style={styles.contentContainer}>
+              <Text style={styles.icon}>{isDownloading ? '📥' : '🎤'}</Text>
+              <Text style={styles.title}>
+                {isDownloading
+                  ? 'Downloading Whisper Model…'
+                  : 'Download Transcription Model'}
+              </Text>
+              <Text style={styles.subtitle}>
+                Enables on-device voice-to-text
+              </Text>
+              <Text style={styles.description}>
+                {isDownloading
+                  ? `Downloading ${APP_CONFIG.getWhisperModelName()} (${APP_CONFIG.getWhisperModelSize()}).`
+                  : `Model: ${APP_CONFIG.getWhisperModelName()}\nSize: ${APP_CONFIG.getWhisperModelSize()}\n\nWi-Fi recommended.`}
+              </Text>
+
+              {isDownloading && (
+                <View style={{ marginTop: 24, alignItems: 'center' }}>
+                  <ActivityIndicator size="large" />
+                  <Text style={{ color: '#fff', marginTop: 16 }}>
+                    {currentPhrase}
+                  </Text>
+                  <Text style={{ color: '#fff', marginTop: 8 }}>
+                    {`${Math.min(100, Math.max(0, downloadProgress)).toFixed(
+                      0,
+                    )}%`}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View
+              style={[
+                styles.bottomContainer,
+                { paddingBottom: insets.bottom || 16 },
+              ]}
+            >
+              {currentStep > 0 && (
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => setCurrentStep(currentStep - 1)}
+                  disabled={isDownloading}
+                >
+                  <Text style={styles.backButtonText}>Back</Text>
+                </TouchableOpacity>
+              )}
+              {!isDownloading && (
+                <TouchableOpacity
+                  style={styles.nextButton}
+                  onPress={handleNext}
+                >
+                  <Text style={styles.nextButtonText}>Start Download</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </ScrollView>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // --- NEW: Render Microphone Permission step ---
+  if (step?.type === 'microphone_permission') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            bounces={false}
+          >
+            <View style={styles.progressContainer}>
+              {onboardingSteps.map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.progressDot,
+                    index <= currentStep && styles.activeProgressDot,
+                  ]}
+                />
+              ))}
+            </View>
+
+            <View style={styles.contentContainer}>
+              <Text style={styles.icon}>🎙️</Text>
+              <Text style={styles.title}>Microphone Permission</Text>
+              <Text style={styles.subtitle}>
+                Required for voice transcription
+              </Text>
+              <Text style={styles.description}>
+                Your voice stays on device. We never upload audio.
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.bottomContainer,
+                { paddingBottom: insets.bottom || 16 },
+              ]}
+            >
+              {currentStep > 0 && (
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => setCurrentStep(currentStep - 1)}
+                >
+                  <Text style={styles.backButtonText}>Back</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
+                <Text style={styles.nextButtonText}>Grant Access</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // --- Render Interactive Swipe step (unchanged appearance) ---
+  if (step?.type === 'interactive_swipe') {
     const phaseLabel =
       swipePhase === 'right'
         ? 'Swipe Right'
@@ -476,28 +970,26 @@ const Onboarding: React.FC = () => {
         <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
           <PanGestureHandler onHandlerStateChange={handleSwipeGesture}>
             <View style={styles.interactiveContainer}>
-              {/* Progress Indicator */}
-              <View style={styles.progressContainer}>
-                {onboardingSteps.map((_, index) => (
-                  <View
-                    key={index}
-                    style={[
-                      styles.progressDot,
-                      index <= currentStep && styles.activeProgressDot,
-                    ]}
-                  />
-                ))}
+              <View>
+                <View style={styles.progressContainer}>
+                  {onboardingSteps.map((_, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.progressDot,
+                        index <= currentStep && styles.activeProgressDot,
+                      ]}
+                    />
+                  ))}
+                </View>
               </View>
-              {/* Content */}
               <View style={styles.contentContainer}>
                 <View style={styles.interactiveArea}>
-                  {/* Trash can only in up phase */}
                   {swipePhase === 'up' && (
                     <View style={styles.trashContainer}>
                       <Text style={styles.trashIcon}>🗑️</Text>
                     </View>
                   )}
-                  {/* Animated logo image */}
                   {logoVisible && (
                     <Animated.View
                       style={[styles.animatedImage, { opacity: logoOpacity }]}
@@ -509,14 +1001,12 @@ const Onboarding: React.FC = () => {
                       />
                     </Animated.View>
                   )}
-                  {/* Arrow and label */}
                   <View style={styles.arrowLabelContainer}>
                     <Text style={styles.arrowText}>{phaseArrow}</Text>
                     <Text style={styles.arrowLabelBig}>{phaseLabel}</Text>
                   </View>
                 </View>
               </View>
-              {/* Bottom Actions */}
               <View
                 style={[
                   styles.bottomContainer,
@@ -543,6 +1033,7 @@ const Onboarding: React.FC = () => {
     );
   }
 
+  // --- Default generic steps (welcome/smart/safe + final photos permission) ---
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -552,7 +1043,6 @@ const Onboarding: React.FC = () => {
           showsVerticalScrollIndicator={false}
           bounces={false}
         >
-          {/* Progress Indicator */}
           <View style={styles.progressContainer}>
             {onboardingSteps.map((_, index) => (
               <View
@@ -564,16 +1054,12 @@ const Onboarding: React.FC = () => {
               />
             ))}
           </View>
-
-          {/* Content */}
           <View style={styles.contentContainer}>
             <Text style={styles.icon}>{step.icon}</Text>
             <Text style={styles.title}>{step.title}</Text>
             <Text style={styles.subtitle}>{step.subtitle}</Text>
             <Text style={styles.description}>{step.description}</Text>
           </View>
-
-          {/* Bottom Actions */}
           <View
             style={[
               styles.bottomContainer,
@@ -588,7 +1074,6 @@ const Onboarding: React.FC = () => {
                 <Text style={styles.backButtonText}>Back</Text>
               </TouchableOpacity>
             )}
-
             <TouchableOpacity
               style={[
                 styles.nextButton,
@@ -612,20 +1097,17 @@ const Onboarding: React.FC = () => {
   );
 };
 
+// --- styles (unchanged from your file) ---
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  gradient: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 24,
     paddingTop: responsiveValues.topPadding,
     paddingBottom: responsiveValues.bottomPadding,
     justifyContent: 'space-between',
-    minHeight: height - 100, // Ensure minimum height for proper spacing
+    minHeight: height - 100,
   },
   progressContainer: {
     flexDirection: 'row',
@@ -639,9 +1121,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
     marginHorizontal: 6,
   },
-  activeProgressDot: {
-    backgroundColor: '#ffffff',
-  },
+  activeProgressDot: { backgroundColor: '#ffffff' },
   contentContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -706,101 +1186,47 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 12,
   },
-  singleButton: {
-    marginLeft: 0,
-  },
+  singleButton: { marginLeft: 0 },
   nextButtonText: {
     color: '#667eea',
     fontSize: responsiveValues.buttonText,
     fontWeight: '700',
     textAlign: 'center',
   },
-  // Privacy agreement specific styles
+
+  // privacy styles
   privacyContainer: {
     flex: 1,
     paddingHorizontal: 24,
     paddingTop: responsiveValues.topPadding,
     paddingBottom: responsiveValues.bottomPadding,
   },
-  privacyHeader: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
+  privacyHeader: { alignItems: 'center', marginBottom: 20 },
   agreementContainer: {
     flex: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 12,
     marginBottom: 20,
   },
-  agreementScroll: {
-    flex: 1,
-  },
-  agreementContent: {
-    padding: 20,
-  },
+  agreementScroll: { flex: 1 },
+  agreementContent: { padding: 20 },
   agreementText: {
     fontSize: responsiveValues.descriptionSize - 1,
     color: '#ffffff',
     lineHeight: (responsiveValues.descriptionSize - 1) * 1.4,
     opacity: 0.9,
   },
-  disabledButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  disabledButtonText: {
-    color: 'rgba(255, 255, 255, 0.6)',
-  },
-  // Interactive swipe step styles
+  disabledButton: { backgroundColor: 'rgba(255, 255, 255, 0.3)' },
+  disabledButtonText: { color: 'rgba(255, 255, 255, 0.6)' },
+
+  // interactive swipe
   interactiveContainer: {
     flex: 1,
     paddingHorizontal: 24,
     paddingTop: responsiveValues.topPadding,
     paddingBottom: responsiveValues.bottomPadding,
   },
-  onboardingImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 24,
-  },
-  swipeInstructions: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  swipeProgress: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 20,
-    width: '100%',
-  },
-  swipeStep: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  completedSwipe: {
-    backgroundColor: 'rgba(76, 175, 80, 0.3)',
-    borderColor: '#4CAF50',
-    borderWidth: 1,
-  },
-  swipeStepText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  checkmark: {
-    color: '#4CAF50',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  completedButton: {
-    backgroundColor: '#4CAF50',
-  },
+  onboardingImage: { width: '100%', height: '100%', borderRadius: 24 },
   interactiveArea: {
     flexDirection: 'column',
     alignItems: 'center',
@@ -816,16 +1242,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
-  trashIcon: {
-    fontSize: width * 0.05,
-  },
-  swipeArea: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    width: '100%',
-    position: 'relative',
-  },
+  trashIcon: { fontSize: width * 0.05 },
   animatedImage: {
     width: width * 0.7,
     height: height * 0.35,
@@ -837,36 +1254,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
   },
-  leftArrow: {
-    alignItems: 'center',
-  },
-  rightArrow: {
-    alignItems: 'center',
-  },
-  upArrow: {
-    alignItems: 'center',
-  },
-  arrowText: {
-    fontSize: width * 0.1,
-    color: '#ffffff',
-    fontWeight: 'bold',
-  },
-  arrowLabel: {
-    fontSize: responsiveValues.subtitleSize - 2,
-    color: '#ffffff',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  arrowLabelContainer: {
-    position: 'absolute',
-    bottom: -height * 0.15, // Position below the swipe area
-    alignItems: 'center',
-  },
+  arrowText: { fontSize: width * 0.1, color: '#ffffff', fontWeight: 'bold' },
   arrowLabelBig: {
     fontSize: responsiveValues.subtitleSize + 2,
     color: '#ffffff',
     marginTop: 8,
     textAlign: 'center',
+  },
+  arrowLabelContainer: {
+    position: 'absolute',
+    bottom: -height * 0.15,
+    alignItems: 'center',
   },
 });
 

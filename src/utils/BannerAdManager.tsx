@@ -1,3 +1,4 @@
+import React from 'react';
 import {
   BannerAd,
   BannerAdSize,
@@ -125,7 +126,7 @@ class BannerAdManager {
   /**
    * Create a banner ad component
    */
-  public createBannerAd(): JSX.Element {
+  public createBannerAd(): React.JSX.Element {
     return (
       <BannerAd
         unitId={this.AD_UNIT_ID}

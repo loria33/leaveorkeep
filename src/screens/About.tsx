@@ -108,9 +108,9 @@ const About: React.FC<AboutProps> = ({ onClose, onPreferencesChanged }) => {
 
         {/* About Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>About LeaveMKeepM</Text>
+          <Text style={styles.sectionTitle}>About KeepFlick</Text>
           <Text style={styles.sectionText}>
-            LeaveMKeepM is a powerful photo and video management app designed to
+            KeepFlick is a powerful photo and video management app designed to
             help you organize and clean up your media library.
           </Text>
           <Text style={styles.sectionText}>Features include:</Text>
@@ -129,7 +129,7 @@ const About: React.FC<AboutProps> = ({ onClose, onPreferencesChanged }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>App Information</Text>
           <Text style={styles.versionText}>Version 1.1.0</Text>
-          <Text style={styles.copyrightText}>© 2024 LeaveMKeepM</Text>
+          <Text style={styles.copyrightText}>© 2024 KeepFlick</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

@@ -7,8 +7,14 @@ import {
   Dimensions,
   SafeAreaView,
   StatusBar,
+  Platform,
+  PlatformColor,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import {
+  LiquidGlassView,
+  isLiquidGlassSupported,
+} from '@callstack/liquid-glass';
 import { MonthSelectionData } from '../utils/mediaScanner';
 
 interface MonthSelectionProps {
@@ -70,38 +76,97 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
             activeOpacity={0.9}
             style={{ marginBottom: 12 }}
           >
-            <LinearGradient
-              colors={['#B9DEFF', '#D9EEFF']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.actionGradient, { height: cardHeight }]}
-            >
-              <View style={styles.actionContent}>
-                <View
-                  style={[
-                    styles.iconCircle,
-                    { width: iconCircleSize, height: iconCircleSize },
-                  ]}
-                >
-                  <Text
+            {isLiquidGlassSupported ? (
+              <LiquidGlassView
+                style={[styles.actionGradient, { height: cardHeight }]}
+                effect="clear"
+                interactive={false}
+              >
+                <View style={styles.actionContent}>
+                  <View
                     style={[
-                      styles.actionIcon,
-                      { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                      styles.iconCircle,
+                      { width: iconCircleSize, height: iconCircleSize },
                     ]}
                   >
-                    📱
+                    <Text
+                      style={[
+                        styles.actionIcon,
+                        { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                      ]}
+                    >
+                      📱
+                    </Text>
+                  </View>
+                  <View style={styles.actionTexts}>
+                    <Text
+                      style={[
+                        styles.actionTitle,
+                        Platform.OS === 'ios' && {
+                          color: PlatformColor('labelColor'),
+                        },
+                      ]}
+                    >
+                      All Media
+                    </Text>
+                    <Text
+                      style={[
+                        styles.actionCount,
+                        Platform.OS === 'ios' && {
+                          color: PlatformColor('secondaryLabelColor'),
+                        },
+                      ]}
+                    >
+                      {monthData.totalCount}{' '}
+                      {monthData.totalCount === 1 ? 'item' : 'items'}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.actionArrow,
+                      Platform.OS === 'ios' && {
+                        color: PlatformColor('labelColor'),
+                      },
+                    ]}
+                  >
+                    ›
                   </Text>
                 </View>
-                <View style={styles.actionTexts}>
-                  <Text style={styles.actionTitle}>All Media</Text>
-                  <Text style={styles.actionCount}>
-                    {monthData.totalCount}{' '}
-                    {monthData.totalCount === 1 ? 'item' : 'items'}
-                  </Text>
+              </LiquidGlassView>
+            ) : (
+              <LinearGradient
+                colors={['#B9DEFF', '#D9EEFF']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.actionGradient, { height: cardHeight }]}
+              >
+                <View style={styles.actionContent}>
+                  <View
+                    style={[
+                      styles.iconCircle,
+                      { width: iconCircleSize, height: iconCircleSize },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.actionIcon,
+                        { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                      ]}
+                    >
+                      📱
+                    </Text>
+                  </View>
+                  <View style={styles.actionTexts}>
+                    <Text style={styles.actionTitle}>All Media</Text>
+                    <Text style={styles.actionCount}>
+                      {monthData.totalCount}{' '}
+                      {monthData.totalCount === 1 ? 'item' : 'items'}
+                    </Text>
+                  </View>
+                  <Text style={styles.actionArrow}>›</Text>
                 </View>
-                <Text style={styles.actionArrow}>›</Text>
-              </View>
-            </LinearGradient>
+              </LinearGradient>
+            )}
           </TouchableOpacity>
 
           {/* Photos */}
@@ -114,38 +179,97 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
               opacity: monthData.photoCount === 0 ? 0.5 : 1,
             }}
           >
-            <LinearGradient
-              colors={['#FFC2CF', '#FFDDE6']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.actionGradient, { height: cardHeight }]}
-            >
-              <View style={styles.actionContent}>
-                <View
-                  style={[
-                    styles.iconCircle,
-                    { width: iconCircleSize, height: iconCircleSize },
-                  ]}
-                >
-                  <Text
+            {isLiquidGlassSupported ? (
+              <LiquidGlassView
+                style={[styles.actionGradient, { height: cardHeight }]}
+                effect="clear"
+                interactive={false}
+              >
+                <View style={styles.actionContent}>
+                  <View
                     style={[
-                      styles.actionIcon,
-                      { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                      styles.iconCircle,
+                      { width: iconCircleSize, height: iconCircleSize },
                     ]}
                   >
-                    📸
+                    <Text
+                      style={[
+                        styles.actionIcon,
+                        { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                      ]}
+                    >
+                      📸
+                    </Text>
+                  </View>
+                  <View style={styles.actionTexts}>
+                    <Text
+                      style={[
+                        styles.actionTitle,
+                        Platform.OS === 'ios' && {
+                          color: PlatformColor('labelColor'),
+                        },
+                      ]}
+                    >
+                      Photos
+                    </Text>
+                    <Text
+                      style={[
+                        styles.actionCount,
+                        Platform.OS === 'ios' && {
+                          color: PlatformColor('secondaryLabelColor'),
+                        },
+                      ]}
+                    >
+                      {monthData.photoCount}{' '}
+                      {monthData.photoCount === 1 ? 'photo' : 'photos'}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.actionArrow,
+                      Platform.OS === 'ios' && {
+                        color: PlatformColor('labelColor'),
+                      },
+                    ]}
+                  >
+                    ›
                   </Text>
                 </View>
-                <View style={styles.actionTexts}>
-                  <Text style={styles.actionTitle}>Photos</Text>
-                  <Text style={styles.actionCount}>
-                    {monthData.photoCount}{' '}
-                    {monthData.photoCount === 1 ? 'photo' : 'photos'}
-                  </Text>
+              </LiquidGlassView>
+            ) : (
+              <LinearGradient
+                colors={['#FFC2CF', '#FFDDE6']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.actionGradient, { height: cardHeight }]}
+              >
+                <View style={styles.actionContent}>
+                  <View
+                    style={[
+                      styles.iconCircle,
+                      { width: iconCircleSize, height: iconCircleSize },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.actionIcon,
+                        { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                      ]}
+                    >
+                      📸
+                    </Text>
+                  </View>
+                  <View style={styles.actionTexts}>
+                    <Text style={styles.actionTitle}>Photos</Text>
+                    <Text style={styles.actionCount}>
+                      {monthData.photoCount}{' '}
+                      {monthData.photoCount === 1 ? 'photo' : 'photos'}
+                    </Text>
+                  </View>
+                  <Text style={styles.actionArrow}>›</Text>
                 </View>
-                <Text style={styles.actionArrow}>›</Text>
-              </View>
-            </LinearGradient>
+              </LinearGradient>
+            )}
           </TouchableOpacity>
 
           {/* Videos */}
@@ -155,38 +279,97 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
             activeOpacity={0.9}
             style={{ opacity: monthData.videoCount === 0 ? 0.5 : 1 }}
           >
-            <LinearGradient
-              colors={['#D1C4FF', '#ECE6FF']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.actionGradient, { height: cardHeight }]}
-            >
-              <View style={styles.actionContent}>
-                <View
-                  style={[
-                    styles.iconCircle,
-                    { width: iconCircleSize, height: iconCircleSize },
-                  ]}
-                >
-                  <Text
+            {isLiquidGlassSupported ? (
+              <LiquidGlassView
+                style={[styles.actionGradient, { height: cardHeight }]}
+                effect="clear"
+                interactive={false}
+              >
+                <View style={styles.actionContent}>
+                  <View
                     style={[
-                      styles.actionIcon,
-                      { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                      styles.iconCircle,
+                      { width: iconCircleSize, height: iconCircleSize },
                     ]}
                   >
-                    🎥
+                    <Text
+                      style={[
+                        styles.actionIcon,
+                        { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                      ]}
+                    >
+                      🎥
+                    </Text>
+                  </View>
+                  <View style={styles.actionTexts}>
+                    <Text
+                      style={[
+                        styles.actionTitle,
+                        Platform.OS === 'ios' && {
+                          color: PlatformColor('labelColor'),
+                        },
+                      ]}
+                    >
+                      Videos
+                    </Text>
+                    <Text
+                      style={[
+                        styles.actionCount,
+                        Platform.OS === 'ios' && {
+                          color: PlatformColor('secondaryLabelColor'),
+                        },
+                      ]}
+                    >
+                      {monthData.videoCount}{' '}
+                      {monthData.videoCount === 1 ? 'video' : 'videos'}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.actionArrow,
+                      Platform.OS === 'ios' && {
+                        color: PlatformColor('labelColor'),
+                      },
+                    ]}
+                  >
+                    ›
                   </Text>
                 </View>
-                <View style={styles.actionTexts}>
-                  <Text style={styles.actionTitle}>Videos</Text>
-                  <Text style={styles.actionCount}>
-                    {monthData.videoCount}{' '}
-                    {monthData.videoCount === 1 ? 'video' : 'videos'}
-                  </Text>
+              </LiquidGlassView>
+            ) : (
+              <LinearGradient
+                colors={['#D1C4FF', '#ECE6FF']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.actionGradient, { height: cardHeight }]}
+              >
+                <View style={styles.actionContent}>
+                  <View
+                    style={[
+                      styles.iconCircle,
+                      { width: iconCircleSize, height: iconCircleSize },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.actionIcon,
+                        { fontSize: iconFontSize, lineHeight: iconLineHeight },
+                      ]}
+                    >
+                      🎥
+                    </Text>
+                  </View>
+                  <View style={styles.actionTexts}>
+                    <Text style={styles.actionTitle}>Videos</Text>
+                    <Text style={styles.actionCount}>
+                      {monthData.videoCount}{' '}
+                      {monthData.videoCount === 1 ? 'video' : 'videos'}
+                    </Text>
+                  </View>
+                  <Text style={styles.actionArrow}>›</Text>
                 </View>
-                <Text style={styles.actionArrow}>›</Text>
-              </View>
-            </LinearGradient>
+              </LinearGradient>
+            )}
           </TouchableOpacity>
         </View>
       </View>

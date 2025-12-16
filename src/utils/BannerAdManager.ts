@@ -1,19 +1,13 @@
-import {
-  BannerAd,
-  BannerAdSize,
-  TestIds,
-} from 'react-native-google-mobile-ads';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { View } from 'react-native';
 
 /**
- * BannerAdManager - Handles banner ad display every X clicks
+ * BannerAdManager - Handles banner ad display timing every X clicks
  *
  * Features:
  * - Shows banner ad after every 7 swipes
  * - Respects premium user status
  * - Uses test IDs for development
- * - Handles ad events and errors
+ * - Provides ad unit ID for banner components
  * - Supports custom actions when ads are shown
  */
 class BannerAdManager {
@@ -25,9 +19,10 @@ class BannerAdManager {
   private onAdShownCallback: (() => void) | null = null;
 
   // Automatically use test ID in development, production ID in release
-  private readonly AD_UNIT_ID = __DEV__
-    ? TestIds.BANNER
-    : 'ca-app-pub-5483809755530109/7907237492';
+  private readonly AD_UNIT_ID =
+    process.env.NODE_ENV === 'development'
+      ? 'ca-app-pub-3940256099942544/6300978111' // Test banner ad unit ID
+      : 'ca-app-pub-5483809755530109/7907237492';
 
   private constructor() {
     this.loadPremiumStatus();
@@ -69,6 +64,13 @@ class BannerAdManager {
    */
   public getPremiumStatus(): boolean {
     return this.isPremiumUser;
+  }
+
+  /**
+   * Get the ad unit ID for banner ads
+   */
+  public getAdUnitId(): string {
+    return this.AD_UNIT_ID;
   }
 
   /**
@@ -120,35 +122,6 @@ class BannerAdManager {
     }
 
     return false;
-  }
-
-  /**
-   * Create a banner ad component
-   */
-  public createBannerAd(): JSX.Element {
-    return (
-      <BannerAd
-        unitId={this.AD_UNIT_ID}
-        size={BannerAdSize.BANNER}
-        requestOptions={{
-          requestNonPersonalizedAdsOnly: false,
-        }}
-        onAdLoaded={() => {
-          // Banner ad loaded successfully
-        }}
-        onAdFailedToLoad={error => {
-          // Banner ad failed to load
-          this.isAdCurrentlyShowing = false;
-        }}
-        onAdOpened={() => {
-          // Banner ad opened
-        }}
-        onAdClosed={() => {
-          // Banner ad closed
-          this.isAdCurrentlyShowing = false;
-        }}
-      />
-    );
   }
 
   /**
