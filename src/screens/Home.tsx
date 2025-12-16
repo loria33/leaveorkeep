@@ -229,6 +229,9 @@ const Home: React.FC = () => {
       started: boolean;
     };
   }>({});
+  const [monthFilter, setMonthFilter] = useState<
+    'all' | 'needToFinish' | 'notStarted'
+  >('all');
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -1132,75 +1135,151 @@ const Home: React.FC = () => {
                         </TouchableOpacity>
                       </View>
 
-                      {!hideDuplicates && (
-                        <LinearGradient
-                          colors={gradientPalette.lightPurple}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 1, y: 0 }}
-                          style={styles.groupCardGradient}
-                        >
-                          <View style={styles.groupCardInner}>
-                            <View style={styles.groupCardContent}>
-                              <View style={styles.groupIconCircle}>
-                                <Text style={styles.groupIcon}>♻️</Text>
+                      {!hideDuplicates &&
+                        (isLiquidGlassSupported ? (
+                          <LiquidGlassView
+                            style={styles.groupCardGradient}
+                            effect="clear"
+                            interactive={false}
+                          >
+                            <View style={styles.groupCardInner}>
+                              <View style={styles.groupCardContent}>
+                                <View style={styles.groupIconCircle}>
+                                  <Text style={styles.groupIcon}>♻️</Text>
+                                </View>
+                                <View style={styles.groupTextCol}>
+                                  <Text style={styles.groupPrimary}>
+                                    Find and review duplicates
+                                  </Text>
+                                  <Text style={styles.groupSecondary}>
+                                    {
+                                      duplicateItems.filter(
+                                        i => i.type === 'photo',
+                                      ).length
+                                    }{' '}
+                                    photos •{' '}
+                                    {
+                                      duplicateItems.filter(
+                                        i => i.type === 'video',
+                                      ).length
+                                    }{' '}
+                                    videos
+                                  </Text>
+                                </View>
                               </View>
-                              <View style={styles.groupTextCol}>
-                                <Text style={styles.groupPrimary}>
-                                  Find and review duplicates
-                                </Text>
-                                <Text style={styles.groupSecondary}>
-                                  {
+                              <View style={styles.chipRow}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.chipButton,
                                     duplicateItems.filter(
                                       i => i.type === 'photo',
-                                    ).length
-                                  }{' '}
-                                  photos •{' '}
-                                  {
+                                    ).length === 0 && styles.chipDisabled,
+                                  ]}
+                                  onPress={() =>
+                                    handleDuplicateTypePress('photos')
+                                  }
+                                  disabled={
+                                    duplicateItems.filter(
+                                      i => i.type === 'photo',
+                                    ).length === 0
+                                  }
+                                >
+                                  <Text style={styles.chipText}>Photos</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.chipButton,
                                     duplicateItems.filter(
                                       i => i.type === 'video',
-                                    ).length
-                                  }{' '}
-                                  videos
-                                </Text>
+                                    ).length === 0 && styles.chipDisabled,
+                                  ]}
+                                  onPress={() =>
+                                    handleDuplicateTypePress('videos')
+                                  }
+                                  disabled={
+                                    duplicateItems.filter(
+                                      i => i.type === 'video',
+                                    ).length === 0
+                                  }
+                                >
+                                  <Text style={styles.chipText}>Videos</Text>
+                                </TouchableOpacity>
                               </View>
                             </View>
-                            <View style={styles.chipRow}>
-                              <TouchableOpacity
-                                style={[
-                                  styles.chipButton,
-                                  duplicateItems.filter(i => i.type === 'photo')
-                                    .length === 0 && styles.chipDisabled,
-                                ]}
-                                onPress={() =>
-                                  handleDuplicateTypePress('photos')
-                                }
-                                disabled={
-                                  duplicateItems.filter(i => i.type === 'photo')
-                                    .length === 0
-                                }
-                              >
-                                <Text style={styles.chipText}>Photos</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                style={[
-                                  styles.chipButton,
-                                  duplicateItems.filter(i => i.type === 'video')
-                                    .length === 0 && styles.chipDisabled,
-                                ]}
-                                onPress={() =>
-                                  handleDuplicateTypePress('videos')
-                                }
-                                disabled={
-                                  duplicateItems.filter(i => i.type === 'video')
-                                    .length === 0
-                                }
-                              >
-                                <Text style={styles.chipText}>Videos</Text>
-                              </TouchableOpacity>
+                          </LiquidGlassView>
+                        ) : (
+                          <LinearGradient
+                            colors={gradientPalette.lightPurple}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.groupCardGradient}
+                          >
+                            <View style={styles.groupCardInner}>
+                              <View style={styles.groupCardContent}>
+                                <View style={styles.groupIconCircle}>
+                                  <Text style={styles.groupIcon}>♻️</Text>
+                                </View>
+                                <View style={styles.groupTextCol}>
+                                  <Text style={styles.groupPrimary}>
+                                    Find and review duplicates
+                                  </Text>
+                                  <Text style={styles.groupSecondary}>
+                                    {
+                                      duplicateItems.filter(
+                                        i => i.type === 'photo',
+                                      ).length
+                                    }{' '}
+                                    photos •{' '}
+                                    {
+                                      duplicateItems.filter(
+                                        i => i.type === 'video',
+                                      ).length
+                                    }{' '}
+                                    videos
+                                  </Text>
+                                </View>
+                              </View>
+                              <View style={styles.chipRow}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.chipButton,
+                                    duplicateItems.filter(
+                                      i => i.type === 'photo',
+                                    ).length === 0 && styles.chipDisabled,
+                                  ]}
+                                  onPress={() =>
+                                    handleDuplicateTypePress('photos')
+                                  }
+                                  disabled={
+                                    duplicateItems.filter(
+                                      i => i.type === 'photo',
+                                    ).length === 0
+                                  }
+                                >
+                                  <Text style={styles.chipText}>Photos</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.chipButton,
+                                    duplicateItems.filter(
+                                      i => i.type === 'video',
+                                    ).length === 0 && styles.chipDisabled,
+                                  ]}
+                                  onPress={() =>
+                                    handleDuplicateTypePress('videos')
+                                  }
+                                  disabled={
+                                    duplicateItems.filter(
+                                      i => i.type === 'video',
+                                    ).length === 0
+                                  }
+                                >
+                                  <Text style={styles.chipText}>Videos</Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
-                          </View>
-                        </LinearGradient>
-                      )}
+                          </LinearGradient>
+                        ))}
                     </View>
 
                     {/* Recent group */}
@@ -1225,151 +1304,379 @@ const Home: React.FC = () => {
                           </Text>
                         </TouchableOpacity>
                       </View>
-                      {!hideTimeFilters && (
-                        <LinearGradient
-                          colors={gradientPalette.lightBlue}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 1, y: 0 }}
-                          style={styles.groupCardGradient}
-                        >
-                          <View style={styles.groupCardInner}>
-                            <View style={styles.groupCardContent}>
-                              <View style={styles.groupIconCircle}>
-                                <Text style={styles.groupIcon}>📆</Text>
+                      {!hideTimeFilters &&
+                        (isLiquidGlassSupported ? (
+                          <LiquidGlassView
+                            style={styles.groupCardGradient}
+                            effect="clear"
+                            interactive={false}
+                          >
+                            <View style={styles.groupCardInner}>
+                              <View style={styles.groupCardContent}>
+                                <View style={styles.groupIconCircle}>
+                                  <Text style={styles.groupIcon}>📆</Text>
+                                </View>
+                                <View style={styles.groupTextCol}>
+                                  <Text style={styles.groupPrimary}>
+                                    Quick time filters
+                                  </Text>
+                                  <Text style={styles.groupSecondary}>
+                                    Today • Yesterday
+                                  </Text>
+                                </View>
                               </View>
-                              <View style={styles.groupTextCol}>
-                                <Text style={styles.groupPrimary}>
-                                  Quick time filters
-                                </Text>
-                                <Text style={styles.groupSecondary}>
-                                  Today • Yesterday
-                                </Text>
+                              <View style={styles.chipRow}>
+                                <TouchableOpacity
+                                  style={styles.chipButton}
+                                  onPress={() => handleTimeFilterPress('today')}
+                                >
+                                  <Text style={styles.chipText}>Today</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={styles.chipButton}
+                                  onPress={() =>
+                                    handleTimeFilterPress('yesterday')
+                                  }
+                                >
+                                  <Text style={styles.chipText}>Yesterday</Text>
+                                </TouchableOpacity>
                               </View>
                             </View>
-                            <View style={styles.chipRow}>
-                              <TouchableOpacity
-                                style={styles.chipButton}
-                                onPress={() => handleTimeFilterPress('today')}
-                              >
-                                <Text style={styles.chipText}>Today</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                style={styles.chipButton}
-                                onPress={() =>
-                                  handleTimeFilterPress('yesterday')
-                                }
-                              >
-                                <Text style={styles.chipText}>Yesterday</Text>
-                              </TouchableOpacity>
+                          </LiquidGlassView>
+                        ) : (
+                          <LinearGradient
+                            colors={gradientPalette.lightBlue}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.groupCardGradient}
+                          >
+                            <View style={styles.groupCardInner}>
+                              <View style={styles.groupCardContent}>
+                                <View style={styles.groupIconCircle}>
+                                  <Text style={styles.groupIcon}>📆</Text>
+                                </View>
+                                <View style={styles.groupTextCol}>
+                                  <Text style={styles.groupPrimary}>
+                                    Quick time filters
+                                  </Text>
+                                  <Text style={styles.groupSecondary}>
+                                    Today • Yesterday
+                                  </Text>
+                                </View>
+                              </View>
+                              <View style={styles.chipRow}>
+                                <TouchableOpacity
+                                  style={styles.chipButton}
+                                  onPress={() => handleTimeFilterPress('today')}
+                                >
+                                  <Text style={styles.chipText}>Today</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={styles.chipButton}
+                                  onPress={() =>
+                                    handleTimeFilterPress('yesterday')
+                                  }
+                                >
+                                  <Text style={styles.chipText}>Yesterday</Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
-                          </View>
-                        </LinearGradient>
-                      )}
+                          </LinearGradient>
+                        ))}
                     </View>
                   </>
                 )}
               </View>
 
-              {monthSummaries.map((summary, index) => {
-                const count = summary.totalCount || 0;
-                const gradientColors =
-                  monthGradients[index % monthGradients.length];
-                const isCompleted = monthCompletionStatus[summary.monthKey];
-                const progress = monthViewingProgress[summary.monthKey];
-                const showProgress =
-                  progress?.started && !isCompleted && progress.remaining > 0;
-
-                return (
-                  <TouchableOpacity
-                    key={summary.monthKey}
-                    style={styles.monthCard}
-                    onPress={() => handleMonthPress(summary.monthKey)}
-                  >
-                    {isLiquidGlassSupported ? (
-                      <LiquidGlassView
-                        style={styles.monthCardGradient}
-                        effect="clear"
-                        interactive={false}
+              {/* Month Filter Cards */}
+              <View style={styles.monthFilterCardsContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.monthFilterCard,
+                    monthFilter === 'all' && styles.monthFilterCardActive,
+                  ]}
+                  onPress={() => setMonthFilter('all')}
+                  activeOpacity={0.7}
+                >
+                  {isLiquidGlassSupported ? (
+                    <LiquidGlassView
+                      style={styles.monthFilterCardGradient}
+                      effect="clear"
+                      interactive={false}
+                    >
+                      <Text
+                        style={[
+                          styles.monthFilterCardText,
+                          monthFilter === 'all' &&
+                            styles.monthFilterCardTextActive,
+                        ]}
                       >
-                        <View style={styles.monthCardContent}>
-                          <View style={styles.monthInfo}>
-                            <View style={styles.monthTitleRow}>
-                              <View style={styles.monthTitleContainer}>
-                                <Text
-                                  style={[
-                                    styles.monthTitle,
-                                    Platform.OS === 'ios' && {
-                                      color: PlatformColor('labelColor'),
-                                    },
-                                  ]}
-                                >
-                                  {summary.monthName}
-                                </Text>
-                                {isCompleted && (
-                                  <Text style={styles.completedCheckmark}>
-                                    ✓
+                        Show all
+                      </Text>
+                      {monthFilter === 'all' && (
+                        <View style={styles.monthFilterCardUnderline} />
+                      )}
+                    </LiquidGlassView>
+                  ) : (
+                    <LinearGradient
+                      colors={[
+                        'rgba(255, 255, 255, 0.1)',
+                        'rgba(255, 255, 255, 0.05)',
+                      ]}
+                      style={styles.monthFilterCardGradient}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                    >
+                      <Text
+                        style={[
+                          styles.monthFilterCardText,
+                          monthFilter === 'all' &&
+                            styles.monthFilterCardTextActive,
+                        ]}
+                      >
+                        Show all
+                      </Text>
+                      {monthFilter === 'all' && (
+                        <View style={styles.monthFilterCardUnderline} />
+                      )}
+                    </LinearGradient>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.monthFilterCard,
+                    monthFilter === 'needToFinish' &&
+                      styles.monthFilterCardActive,
+                  ]}
+                  onPress={() => setMonthFilter('needToFinish')}
+                  activeOpacity={0.7}
+                >
+                  {isLiquidGlassSupported ? (
+                    <LiquidGlassView
+                      style={styles.monthFilterCardGradient}
+                      effect="clear"
+                      interactive={false}
+                    >
+                      <Text
+                        style={[
+                          styles.monthFilterCardText,
+                          monthFilter === 'needToFinish' &&
+                            styles.monthFilterCardTextActive,
+                        ]}
+                      >
+                        Need to finish
+                      </Text>
+                      {monthFilter === 'needToFinish' && (
+                        <View style={styles.monthFilterCardUnderline} />
+                      )}
+                    </LiquidGlassView>
+                  ) : (
+                    <LinearGradient
+                      colors={[
+                        'rgba(255, 255, 255, 0.1)',
+                        'rgba(255, 255, 255, 0.05)',
+                      ]}
+                      style={styles.monthFilterCardGradient}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                    >
+                      <Text
+                        style={[
+                          styles.monthFilterCardText,
+                          monthFilter === 'needToFinish' &&
+                            styles.monthFilterCardTextActive,
+                        ]}
+                      >
+                        Need to finish
+                      </Text>
+                      {monthFilter === 'needToFinish' && (
+                        <View style={styles.monthFilterCardUnderline} />
+                      )}
+                    </LinearGradient>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.monthFilterCard,
+                    monthFilter === 'notStarted' &&
+                      styles.monthFilterCardActive,
+                  ]}
+                  onPress={() => setMonthFilter('notStarted')}
+                  activeOpacity={0.7}
+                >
+                  {isLiquidGlassSupported ? (
+                    <LiquidGlassView
+                      style={styles.monthFilterCardGradient}
+                      effect="clear"
+                      interactive={false}
+                    >
+                      <Text
+                        style={[
+                          styles.monthFilterCardText,
+                          monthFilter === 'notStarted' &&
+                            styles.monthFilterCardTextActive,
+                        ]}
+                      >
+                        Not started only
+                      </Text>
+                      {monthFilter === 'notStarted' && (
+                        <View style={styles.monthFilterCardUnderline} />
+                      )}
+                    </LiquidGlassView>
+                  ) : (
+                    <LinearGradient
+                      colors={[
+                        'rgba(255, 255, 255, 0.1)',
+                        'rgba(255, 255, 255, 0.05)',
+                      ]}
+                      style={styles.monthFilterCardGradient}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                    >
+                      <Text
+                        style={[
+                          styles.monthFilterCardText,
+                          monthFilter === 'notStarted' &&
+                            styles.monthFilterCardTextActive,
+                        ]}
+                      >
+                        Not started only
+                      </Text>
+                      {monthFilter === 'notStarted' && (
+                        <View style={styles.monthFilterCardUnderline} />
+                      )}
+                    </LinearGradient>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {monthSummaries
+                .filter(summary => {
+                  if (monthFilter === 'all') return true;
+
+                  const isCompleted = monthCompletionStatus[summary.monthKey];
+                  const progress = monthViewingProgress[summary.monthKey];
+                  const hasRemaining = progress?.remaining > 0;
+                  const isStarted = progress?.started || false;
+
+                  if (monthFilter === 'needToFinish') {
+                    // Months that have "X left" (remaining items)
+                    return hasRemaining && !isCompleted;
+                  }
+
+                  if (monthFilter === 'notStarted') {
+                    // Months that don't have checkmark or "X left" (not started)
+                    return !isStarted && !isCompleted;
+                  }
+
+                  return true;
+                })
+                .map(summary => {
+                  const count = summary.totalCount || 0;
+                  // Find original index in monthSummaries for gradient color
+                  const originalIndex = monthSummaries.findIndex(
+                    m => m.monthKey === summary.monthKey,
+                  );
+                  const gradientColors =
+                    monthGradients[originalIndex % monthGradients.length];
+                  const isCompleted = monthCompletionStatus[summary.monthKey];
+                  const progress = monthViewingProgress[summary.monthKey];
+                  const showProgress =
+                    progress?.started && !isCompleted && progress.remaining > 0;
+
+                  return (
+                    <TouchableOpacity
+                      key={summary.monthKey}
+                      style={styles.monthCard}
+                      onPress={() => handleMonthPress(summary.monthKey)}
+                    >
+                      {isLiquidGlassSupported ? (
+                        <LiquidGlassView
+                          style={styles.monthCardGradient}
+                          effect="clear"
+                          interactive={false}
+                        >
+                          <View style={styles.monthCardContent}>
+                            <View style={styles.monthInfo}>
+                              <View style={styles.monthTitleRow}>
+                                <View style={styles.monthTitleContainer}>
+                                  <Text
+                                    style={[
+                                      styles.monthTitle,
+                                      Platform.OS === 'ios' && {
+                                        color: PlatformColor('labelColor'),
+                                      },
+                                    ]}
+                                  >
+                                    {summary.monthName}
                                   </Text>
-                                )}
-                                {showProgress && (
-                                  <Text style={styles.progressBadge}>
-                                    {progress.remaining} left
-                                  </Text>
-                                )}
+                                  {isCompleted && (
+                                    <Text style={styles.completedCheckmark}>
+                                      ✓
+                                    </Text>
+                                  )}
+                                  {showProgress && (
+                                    <Text style={styles.progressBadge}>
+                                      {progress.remaining} left
+                                    </Text>
+                                  )}
+                                </View>
                               </View>
                             </View>
-                          </View>
 
-                          <View style={styles.monthRight}>
-                            <Text
-                              style={[
-                                styles.monthChevron,
-                                Platform.OS === 'ios' && {
-                                  color: PlatformColor('labelColor'),
-                                },
-                              ]}
-                            >
-                              ›
-                            </Text>
-                          </View>
-                        </View>
-                      </LiquidGlassView>
-                    ) : (
-                      <LinearGradient
-                        colors={gradientColors}
-                        style={styles.monthCardGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                      >
-                        <View style={styles.monthCardContent}>
-                          <View style={styles.monthInfo}>
-                            <View style={styles.monthTitleRow}>
-                              <View style={styles.monthTitleContainer}>
-                                <Text style={styles.monthTitle}>
-                                  {summary.monthName}
-                                </Text>
-                                {monthCompletionStatus[summary.monthKey] && (
-                                  <Text style={styles.completedCheckmark}>
-                                    ✓
-                                  </Text>
-                                )}
-                                {showProgress && (
-                                  <Text style={styles.progressBadge}>
-                                    {progress.remaining} left
-                                  </Text>
-                                )}
-                              </View>
+                            <View style={styles.monthRight}>
+                              <Text
+                                style={[
+                                  styles.monthChevron,
+                                  Platform.OS === 'ios' && {
+                                    color: PlatformColor('labelColor'),
+                                  },
+                                ]}
+                              >
+                                ›
+                              </Text>
                             </View>
                           </View>
+                        </LiquidGlassView>
+                      ) : (
+                        <LinearGradient
+                          colors={gradientColors}
+                          style={styles.monthCardGradient}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                        >
+                          <View style={styles.monthCardContent}>
+                            <View style={styles.monthInfo}>
+                              <View style={styles.monthTitleRow}>
+                                <View style={styles.monthTitleContainer}>
+                                  <Text style={styles.monthTitle}>
+                                    {summary.monthName}
+                                  </Text>
+                                  {monthCompletionStatus[summary.monthKey] && (
+                                    <Text style={styles.completedCheckmark}>
+                                      ✓
+                                    </Text>
+                                  )}
+                                  {showProgress && (
+                                    <Text style={styles.progressBadge}>
+                                      {progress.remaining} left
+                                    </Text>
+                                  )}
+                                </View>
+                              </View>
+                            </View>
 
-                          <View style={styles.monthRight}>
-                            <Text style={styles.monthChevron}>›</Text>
+                            <View style={styles.monthRight}>
+                              <Text style={styles.monthChevron}>›</Text>
+                            </View>
                           </View>
-                        </View>
-                      </LinearGradient>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
+                        </LinearGradient>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
 
               <View style={styles.bottomSpacing} />
             </ScrollView>
@@ -2185,6 +2492,53 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 12,
     fontWeight: '700',
+  },
+  monthFilterCardsContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginVertical: 12,
+    gap: 8,
+  },
+  monthFilterCard: {
+    flex: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  monthFilterCardActive: {
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  monthFilterCardGradient: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  monthFilterCardText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+  },
+  monthFilterCardTextActive: {
+    color: '#00D9FF',
+  },
+  monthFilterCardUnderline: {
+    position: 'absolute',
+    bottom: 8,
+    left: '20%',
+    right: '20%',
+    height: 2,
+    backgroundColor: '#00D9FF',
+    borderRadius: 1,
   },
 });
 
