@@ -10,47 +10,92 @@ interface BannerAdComponentProps {
 const BannerAdComponent: React.FC<BannerAdComponentProps> = ({ style }) => {
   const [shouldShowAd, setShouldShowAd] = useState(false);
   const [adKey, setAdKey] = useState(0);
+  const [isPremium, setIsPremium] = useState(false);
 
   useEffect(() => {
-    // Listen for when the BannerAdManager indicates an ad should be shown
+    // Check premium status on mount and when it changes
+    const checkPremiumStatus = async () => {
+      // Reload premium status to ensure it's up to date
+      await BannerAdManager.getInstance().reloadPremiumStatus();
+      const premiumStatus = BannerAdManager.getInstance().getPremiumStatus();
+      setIsPremium(premiumStatus);
+      // If user is premium, don't show ads
+      if (premiumStatus) {
+        setShouldShowAd(false);
+      }
+    };
+    
+    checkPremiumStatus();
+    
+    // Listen for when the BannerAdManager indicates an ad should be shown or hidden
     const adManager = BannerAdManager.getInstance();
 
-    const handleAdShouldShow = () => {
-      setShouldShowAd(true);
-      // Force re-render of the ad component
-      setAdKey(prev => prev + 1);
+    const handleAdShouldShow = async () => {
+      // Double-check premium status before showing ad
+      await adManager.reloadPremiumStatus();
+      const premiumStatus = adManager.getPremiumStatus();
+      if (!premiumStatus) {
+        setShouldShowAd(true);
+        // Force re-render of the ad component
+        setAdKey(prev => prev + 1);
+      }
     };
 
-    // Set up the callback
+    const handleAdShouldHide = () => {
+      setShouldShowAd(false);
+      // Re-register callbacks after hiding to ensure they stay registered
+      // This handles cases where callbacks might be cleared
+      setTimeout(() => {
+        adManager.setAdShownCallback(handleAdShouldShow);
+        adManager.setAdHiddenCallback(handleAdShouldHide);
+      }, 50);
+    };
+
+    // Set up the callbacks - always register them to ensure they're set
     adManager.setAdShownCallback(handleAdShouldShow);
+    adManager.setAdHiddenCallback(handleAdShouldHide);
+
+    // Re-register callbacks when ad is hidden to ensure they stay registered
+    // This handles edge cases where callbacks might be cleared
+    const checkAndReRegister = () => {
+      // Re-register callbacks to ensure they're always set
+      adManager.setAdShownCallback(handleAdShouldShow);
+      adManager.setAdHiddenCallback(handleAdShouldHide);
+    };
+
+    // Re-register after a short delay to handle any timing issues
+    const reRegisterTimeout = setTimeout(checkAndReRegister, 100);
 
     return () => {
-      // Clean up callback when component unmounts
+      // Clean up callbacks when component unmounts
+      clearTimeout(reRegisterTimeout);
       adManager.setAdShownCallback(() => {});
+      adManager.setAdHiddenCallback(() => {});
     };
   }, []);
 
   const handleAdLoaded = () => {
-    console.log('Banner ad loaded successfully');
+    // Banner ad loaded successfully
   };
 
   const handleAdFailedToLoad = (error: any) => {
-    console.log('Banner ad failed to load:', error);
-    // Mark ad as hidden so user can continue
+    // Mark ad as hidden and hide the component
     BannerAdManager.getInstance().markAdAsHidden();
+    setShouldShowAd(false);
   };
 
   const handleAdOpened = () => {
-    console.log('Banner ad opened');
+    // Banner ad opened
   };
 
   const handleAdClosed = () => {
-    console.log('Banner ad closed');
-    // Mark ad as hidden so user can continue
+    // Mark ad as hidden and hide the component
     BannerAdManager.getInstance().markAdAsHidden();
+    setShouldShowAd(false);
   };
 
-  if (!shouldShowAd) {
+  // Don't show ads to premium users
+  if (!shouldShowAd || isPremium) {
     return null;
   }
 

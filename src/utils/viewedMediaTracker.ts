@@ -38,7 +38,7 @@ export const loadViewedItems = async (): Promise<Set<string>> => {
       return viewedItemsCache;
     }
   } catch (error) {
-    console.log('Error loading viewed items:', error);
+    // Error loading viewed items
   }
 
   viewedItemsCache = new Set<string>();
@@ -61,7 +61,7 @@ export const loadCompletedMonths = async (): Promise<Set<string>> => {
       return completedMonthsCache;
     }
   } catch (error) {
-    console.log('Error loading completed months:', error);
+    // Error loading completed months
   }
 
   completedMonthsCache = new Set<string>();
@@ -86,7 +86,6 @@ export const markItemAsViewed = async (itemId: string): Promise<void> => {
   // Only add if not already viewed (avoid unnecessary writes)
   if (!viewedItems.has(itemId)) {
     viewedItems.add(itemId);
-    console.log(`👁️ Marking as viewed: ${itemId.substring(0, 60)}...`);
     
     // Debounce the save operation
     if (saveTimer) {
@@ -99,14 +98,11 @@ export const markItemAsViewed = async (itemId: string): Promise<void> => {
           STORAGE_KEYS.VIEWED_ITEMS,
           JSON.stringify(Array.from(viewedItems)),
         );
-        console.log(`💾 Saved ${viewedItems.size} viewed items to storage`);
       } catch (error) {
-        console.log('❌ Error saving viewed items:', error);
+        // Error saving viewed items
       }
       saveTimer = null;
     }, SAVE_DEBOUNCE_MS);
-  } else {
-    console.log(`⏭️ Already viewed: ${itemId.substring(0, 60)}...`);
   }
 };
 
@@ -137,7 +133,7 @@ export const markItemsAsViewed = async (itemIds: string[]): Promise<void> => {
           JSON.stringify(Array.from(viewedItems)),
         );
       } catch (error) {
-        console.log('Error saving viewed items:', error);
+        // Error saving viewed items
       }
       saveTimer = null;
     }, SAVE_DEBOUNCE_MS);
@@ -160,7 +156,7 @@ export const saveViewedItemsImmediately = async (): Promise<void> => {
         JSON.stringify(Array.from(viewedItemsCache)),
       );
     } catch (error) {
-      console.log('Error saving viewed items:', error);
+      // Error saving viewed items
     }
   }
 };
@@ -181,7 +177,6 @@ export const markMonthAsCompleted = async (monthKey: string): Promise<void> => {
   
   if (!completedMonths.has(monthKey)) {
     completedMonths.add(monthKey);
-    console.log('🎉 MONTH COMPLETED:', monthKey);
     
     try {
       await AsyncStorage.setItem(
@@ -189,7 +184,7 @@ export const markMonthAsCompleted = async (monthKey: string): Promise<void> => {
         JSON.stringify(Array.from(completedMonths)),
       );
     } catch (error) {
-      console.log('❌ Error saving completed months:', error);
+      // Error saving completed months
     }
   }
 };
@@ -229,12 +224,9 @@ export const checkMonthCompletion = async (
   
   const viewedItems = await loadViewedItems();
   
-  // Check each item and log details
+  // Check each item
   const missingItems: string[] = [];
   const viewedItemIds: string[] = [];
-  
-  console.log(`🔍 Checking ${allItems.length} items for ${monthKey}`);
-  console.log(`📋 Total viewed items in storage: ${viewedItems.size}`);
   
   for (const item of allItems) {
     if (viewedItems.has(item.id)) {
@@ -244,25 +236,12 @@ export const checkMonthCompletion = async (
     }
   }
   
-  // Log first few IDs for debugging
-  if (allItems.length > 0) {
-    console.log(`📝 First 3 item IDs from month:`, allItems.slice(0, 3).map(i => i.id.substring(0, 50)));
-  }
-  if (viewedItemIds.length > 0) {
-    console.log(`✅ First 3 viewed IDs:`, viewedItemIds.slice(0, 3).map(id => id.substring(0, 50)));
-  }
-  if (missingItems.length > 0) {
-    console.log(`❌ Missing item IDs:`, missingItems.map(id => id.substring(0, 50)));
-  }
-  
   const allViewed = missingItems.length === 0;
   
   if (allViewed && allItems.length > 0) {
-    console.log(`✅ ${monthKey}: ${allItems.length}/${allItems.length} viewed - COMPLETED!`);
     await markMonthAsCompleted(monthKey);
     return true;
   } else {
-    console.log(`⏳ ${monthKey}: ${allItems.length - missingItems.length}/${allItems.length} viewed - Missing ${missingItems.length} items`);
     return false;
   }
 };
@@ -279,7 +258,6 @@ export const forceCheckMonthCompletion = async (
     const allItems = await fetchAllItems();
     return await checkMonthCompletion(monthKey, allItems);
   } catch (error) {
-    console.log('Error in forceCheckMonthCompletion:', error);
     return false;
   }
 };
@@ -295,7 +273,7 @@ export const clearViewedItems = async (): Promise<void> => {
     await AsyncStorage.removeItem(STORAGE_KEYS.VIEWED_ITEMS);
     await AsyncStorage.removeItem(STORAGE_KEYS.COMPLETED_MONTHS);
   } catch (error) {
-    console.log('Error clearing viewed items:', error);
+    // Error clearing viewed items
   }
 };
 

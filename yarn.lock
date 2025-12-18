@@ -1032,6 +1032,13 @@
   resolved "https://registry.yarnpkg.com/@callstack/liquid-glass/-/liquid-glass-0.6.1.tgz#4b84a17161b4122cccfecd2615bda01f341b21da"
   integrity sha512-8YbxSLLezrE5yF7/DeZ17RdBITmXf18SCAWaCxcnE/YwaYMpew8q3QUshbAUuZi16R7bpcNhbTsj6xBAStsJcQ==
 
+"@dev-amirzubair/react-native-voice@^1.0.4":
+  version "1.0.4"
+  resolved "https://registry.yarnpkg.com/@dev-amirzubair/react-native-voice/-/react-native-voice-1.0.4.tgz#c3fd28f814f53081bd0719c4e8d8f5f3b65b19e8"
+  integrity sha512-/JTxJbs9oc/tvtwiM8mcrnXktL645yeT5YXHNCqon80m6SD7JuMCtu+j8QY0Y50M0wa9Ion33ntY0lQp1KRVsQ==
+  dependencies:
+    invariant "^2.2.4"
+
 "@egjs/hammerjs@^2.0.17":
   version "2.0.17"
   resolved "https://registry.yarnpkg.com/@egjs/hammerjs/-/hammerjs-2.0.17.tgz#5dc02af75a6a06e4c2db0202cae38c9263895124"
@@ -5665,6 +5672,11 @@ react-native-google-mobile-ads@^15.4.0:
     "@iabtcf/core" "^1.5.3"
     use-deep-compare-effect "^1.8.1"
 
+react-native-iap@^14.6.2:
+  version "14.6.2"
+  resolved "https://registry.yarnpkg.com/react-native-iap/-/react-native-iap-14.6.2.tgz#62983a7e66a48e39ba2ee899628695fc487c2c83"
+  integrity sha512-L04zfaxsYMegyUtzi5pLLvgwLkjMOVsnU1yT0dmEpH8VqvpLgQ5Vi+lQr5Cxp9E/ioagtcnbrPi6LZMfgxsr2Q==
+
 react-native-is-edge-to-edge@^1.1.7:
   version "1.2.1"
   resolved "https://registry.yarnpkg.com/react-native-is-edge-to-edge/-/react-native-is-edge-to-edge-1.2.1.tgz#64e10851abd9d176cbf2b40562f751622bde3358"
@@ -5674,6 +5686,11 @@ react-native-linear-gradient@^2.8.3:
   version "2.8.3"
   resolved "https://registry.yarnpkg.com/react-native-linear-gradient/-/react-native-linear-gradient-2.8.3.tgz#9a116649f86d74747304ee13db325e20b21e564f"
   integrity sha512-KflAXZcEg54PXkLyflaSZQ3PJp4uC4whM7nT/Uot9m0e/qxFV3p6uor1983D1YOBJbJN7rrWdqIjq0T42jOJyA==
+
+react-native-nitro-modules@^0.31.10:
+  version "0.31.10"
+  resolved "https://registry.yarnpkg.com/react-native-nitro-modules/-/react-native-nitro-modules-0.31.10.tgz#d21907327200d5761ba6cf328dec36b1516bc270"
+  integrity sha512-hcvjTu9YJE9fMmnAUvhG8CxvYLpOuMQ/2eyi/S6GyrecezF6Rmk/uRQEL6v09BRFWA/xRVZNQVulQPS+2HS3mQ==
 
 react-native-permissions@^5.4.2:
   version "5.4.2"
@@ -6735,11 +6752,6 @@ which@^2.0.1:
   integrity sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==
   dependencies:
     isexe "^2.0.0"
-
-whisper.rn@^0.4.3:
-  version "0.4.3"
-  resolved "https://registry.yarnpkg.com/whisper.rn/-/whisper.rn-0.4.3.tgz#63dac876e05a2d541b7beb97611c863b931ed26d"
-  integrity sha512-isvW9AAtY73l7yvH5u9MzR8J1T4O1J8XXjbYZwiEjQaisoWW25gkiDgYeSK69NmY/RUuPNC+G8iJB76oKCQk5w==
 
 word-wrap@^1.2.5:
   version "1.2.5"

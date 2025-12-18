@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, StyleSheet, Platform } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import mobileAds, { MaxAdContentRating } from 'react-native-google-mobile-ads';
 import { request, PERMISSIONS, RESULTS } from 'react-native-permissions';
 
@@ -11,18 +12,24 @@ import { MediaProvider, useMedia } from './src/context/MediaContext';
 import { AdminProvider } from './src/context/adminContext';
 import { triggerHomeTabPress } from './src/context/TabPressContext';
 
+// Utils
+import InAppPurchaseManager from './src/utils/InAppPurchaseManager';
+
 // Screens
 import Onboarding from './src/screens/Onboarding';
 import Home from './src/screens/Home';
 import Trash from './src/screens/Trash';
+import About from './src/screens/About';
 
 // Navigation Types
 type RootStackParamList = {
   Main: undefined;
   Onboarding: undefined;
+  Example: undefined;
 };
 
 type MainTabParamList = {
+  About: undefined;
   Home: undefined;
   Trash: undefined;
 };
@@ -33,17 +40,35 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 // Tab Navigator
 const MainTabs: React.FC = () => {
   const { trashedItems } = useMedia();
+  const insets = useSafeAreaInsets();
 
   return (
     <Tab.Navigator
+      initialRouteName="Home"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: '#007bff',
         tabBarInactiveTintColor: '#6c757d',
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: [
+          styles.tabBar,
+          {
+            paddingBottom: Math.max(insets.bottom, 4),
+            height: 60 + Math.max(insets.bottom - 4, 0),
+          },
+        ],
         tabBarLabelStyle: styles.tabBarLabel,
       }}
     >
+      <Tab.Screen
+        name="About"
+        component={About}
+        options={{
+          tabBarLabel: 'About',
+          tabBarIcon: ({ color, size }) => (
+            <Text style={[styles.tabIcon, { color, fontSize: size }]}>ℹ️</Text>
+          ),
+        }}
+      />
       <Tab.Screen
         name="Home"
         component={Home}
@@ -84,7 +109,9 @@ const AppNavigator: React.FC = () => {
       {!onboardingComplete ? (
         <Stack.Screen name="Onboarding" component={Onboarding} />
       ) : (
-        <Stack.Screen name="Main" component={MainTabs} />
+        <>
+          <Stack.Screen name="Main" component={MainTabs} />
+        </>
       )}
     </Stack.Navigator>
   );
@@ -133,16 +160,26 @@ const initializeAdMob = async () => {
 const App: React.FC = () => {
   useEffect(() => {
     initializeAdMob();
+
+    // Initialize IAP manager and check premium status
+    const initIAP = async () => {
+      const iapManager = InAppPurchaseManager.getInstance();
+      await iapManager.initialize();
+      await iapManager.checkPremiumStatus();
+    };
+    initIAP();
   }, []);
 
   return (
-    <AdminProvider>
-      <MediaProvider>
-        <NavigationContainer>
-          <AppNavigator />
-        </NavigationContainer>
-      </MediaProvider>
-    </AdminProvider>
+    <SafeAreaProvider>
+      <AdminProvider>
+        <MediaProvider>
+          <NavigationContainer>
+            <AppNavigator />
+          </NavigationContainer>
+        </MediaProvider>
+      </AdminProvider>
+    </SafeAreaProvider>
   );
 };
 

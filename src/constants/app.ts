@@ -1,8 +1,8 @@
 // App Configuration Constants
 export const APP_CONFIG = {
   // Viewing Limits
-  MAX_VIEWS: 55, // Maximum number of pictures that can be viewed per day
-  DAILY_RESET: true, // Reset views daily at midnight
+  MAX_VIEWS: 55, // Maximum number of pictures that can be viewed per hour
+  HOURLY_RESET: true, // Reset views every hour
 
   // Whisper model configuration
   WHISPER: {
@@ -43,7 +43,7 @@ export const APP_CONFIG = {
 export const getViewingConfig = () => {
   return {
     maxViews: APP_CONFIG.MAX_VIEWS,
-    dailyReset: APP_CONFIG.DAILY_RESET,
+    hourlyReset: APP_CONFIG.HOURLY_RESET,
   };
 };
 
@@ -55,6 +55,18 @@ export const getStartOfDay = (): number => {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   return startOfDay.getTime();
+};
+
+// Get the start of the current hour in milliseconds
+export const getStartOfHour = (): number => {
+  const now = new Date();
+  const startOfHour = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    now.getHours(),
+  );
+  return startOfHour.getTime();
 };
 
 // Check if a timestamp is from today

@@ -16,6 +16,7 @@ import {
   PlatformColor,
   Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { setHomeTabPressHandler } from '../context/TabPressContext';
 import LinearGradient from 'react-native-linear-gradient';
@@ -28,13 +29,14 @@ import { useMedia, MediaItem } from '../context/MediaContext';
 import { useAdmin } from '../context/adminContext';
 import MediaViewer from '../components/MediaViewer';
 import MonthSelection from '../components/MonthSelection';
-import About from './About';
-import BannerAdComponent from '../components/BannerAdComponent';
 import { checkMediaPermissionsWithRetry } from '../utils/permissions';
 import { getViewingConfig } from '../constants/app';
 import { MonthSelectionData } from '../utils/mediaScanner';
+import { loadViewedItems } from '../utils/viewedMediaTracker';
 
-const backgroundImage = require('../assets/bg.png');
+const backgroundImagePink = require('../assets/bg.png');
+const backgroundImageBlue = require('../assets/bg2.jpg');
+const keepFlickIcon = require('../assets/kf.png');
 
 // Unified 4-color pastel palette (Light Blue, Light Purple, Light Teal, Light Pink)
 const gradientPalette = {
@@ -42,6 +44,8 @@ const gradientPalette = {
   lightPurple: ['#CDB6FF', '#E6DDFF'],
   lightTeal: ['#A8F0E1', '#D1FFF4'],
   lightPink: ['#FFB3C1', '#FFD6E0'],
+  frostyBlue: ['#B0E0E6', '#E0F6FF'], // Frosty blue for pink theme when liquid glass is unavailable
+  frostyPink: ['#FFC0CB', '#FFE4E9'], // Frosty pink for blue theme when liquid glass is unavailable
 };
 
 const monthGradients = [
@@ -167,6 +171,8 @@ const AbstractLinesBackground: React.FC = () => {
 };
 
 const Home: React.FC = () => {
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const {
     monthSummaries,
     monthContent,
@@ -212,8 +218,6 @@ const Home: React.FC = () => {
   const [selectedMediaType, setSelectedMediaType] = useState<
     'photos' | 'videos' | 'all'
   >('all');
-  const [aboutVisible, setAboutVisible] = useState(false);
-  const [hideDuplicates, setHideDuplicates] = useState(false);
   const [hideTimeFilters, setHideTimeFilters] = useState(false);
   const [hideSourceFilters, setHideSourceFilters] = useState(false);
   const [timeFilterItems, setTimeFilterItems] = useState<MediaItem[]>([]);
@@ -229,9 +233,26 @@ const Home: React.FC = () => {
       started: boolean;
     };
   }>({});
+  const [statusLoaded, setStatusLoaded] = useState<number>(0);
   const [monthFilter, setMonthFilter] = useState<
     'all' | 'needToFinish' | 'notStarted'
   >('all');
+  const [skin, setSkin] = useState<'pink' | 'blue'>('blue');
+
+  // Cache viewed items Set for performance (avoid reloading on every check)
+  const viewedItemsCacheRef = useRef<Set<string> | null>(null);
+
+  // Load viewed items cache on mount
+  useEffect(() => {
+    const loadCache = async () => {
+      try {
+        viewedItemsCacheRef.current = await loadViewedItems();
+      } catch (error) {
+        // Error loading viewed items cache
+      }
+    };
+    loadCache();
+  }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -260,40 +281,23 @@ const Home: React.FC = () => {
     setMonthSelectionVisible(true);
   };
 
-  const handleDuplicatesPress = () => {
-    if (duplicateItems.length > 0) {
-      // setViewerItems(duplicateItems); // Remove this
-      setViewerInitialIndex(0);
-      setViewerVisible(true);
-      setCurrentViewingMonth('DUPLICATES'); // Use a special key for duplicates
-      setSelectedMediaType('all'); // Reset media type for duplicates
-    }
-  };
-
-  const handleDuplicateTypePress = (type: 'photos' | 'videos') => {
-    const filteredItems = duplicateItems.filter(
-      item => item.type === (type === 'photos' ? 'photo' : 'video'),
-    );
-
-    if (filteredItems.length > 0) {
-      setViewerInitialIndex(0);
-      setViewerVisible(true);
-      setCurrentViewingMonth('DUPLICATES');
-      setSelectedMediaType(type === 'photos' ? 'photos' : 'videos');
-    }
-  };
-
   const handleCloseViewer = async () => {
     const viewingMonth = currentViewingMonth;
     setViewerVisible(false);
     setCurrentViewingMonth('');
     setSelectedMediaType('all');
 
+    // Refresh viewed items cache for next time
+    try {
+      viewedItemsCacheRef.current = await loadViewedItems();
+    } catch (error) {
+      // Error refreshing viewed items cache
+    }
+
     // Refresh completion status and progress for the month that was being viewed
     // Wait a bit for storage to be updated from MediaViewer
     if (
       viewingMonth &&
-      viewingMonth !== 'DUPLICATES' &&
       !viewingMonth.startsWith('TIME_FILTER_') &&
       !viewingMonth.startsWith('SOURCE_FILTER_')
     ) {
@@ -323,7 +327,7 @@ const Home: React.FC = () => {
             },
           }));
         } catch (error) {
-          console.log('Error checking completion status:', error);
+          // Error checking completion status
         }
       }, 1500); // Wait 1.5s for storage to be saved
     }
@@ -365,14 +369,99 @@ const Home: React.FC = () => {
     };
   }, [viewerVisible, monthSelectionVisible]);
 
-  // Track when Home screen is focused
+  // Load skin preference function
+  const loadSkinPreference = async () => {
+    try {
+      const savedSkin = await AsyncStorage.getItem('skin');
+      if (savedSkin === 'pink' || savedSkin === 'blue') {
+        setSkin(savedSkin);
+      }
+    } catch (error) {
+      // Error loading skin preference
+    }
+  };
+
+  // Load and update month completion status and progress
+  // Extract as a reusable function so it can be called from multiple places
+  const loadMonthStatus = React.useCallback(async () => {
+    if (monthSummaries.length === 0) return;
+
+    const status: { [monthKey: string]: boolean } = {};
+    const progress: {
+      [monthKey: string]: {
+        viewed: number;
+        total: number;
+        remaining: number;
+        started: boolean;
+      };
+    } = {};
+
+    for (const summary of monthSummaries) {
+      try {
+        // Check completion status
+        const { isMonthCompleted } = await import(
+          '../utils/viewedMediaTracker'
+        );
+        status[summary.monthKey] = await isMonthCompleted(summary.monthKey);
+
+        // Get progress stats
+        const stats = await getMonthViewedStats(summary.monthKey);
+        const started = stats.viewedCount > 0;
+        const remaining = stats.totalCount - stats.viewedCount;
+
+        progress[summary.monthKey] = {
+          viewed: stats.viewedCount,
+          total: stats.totalCount,
+          remaining,
+          started,
+        };
+      } catch (error) {
+        status[summary.monthKey] = false;
+        progress[summary.monthKey] = {
+          viewed: 0,
+          total: 0,
+          remaining: 0,
+          started: false,
+        };
+      }
+    }
+    // Use functional update to ensure state is set even if component re-renders
+    // Force update by creating new objects to ensure React detects the change
+    // Update both states and statusLoaded together to ensure re-render
+    setMonthCompletionStatus(prev => {
+      const newStatus = { ...prev, ...status };
+      // Return new object even if values are the same to force re-render
+      return newStatus;
+    });
+    setMonthViewingProgress(prev => {
+      const newProgress = { ...prev, ...progress };
+      // Return new object even if values are the same to force re-render
+      return newProgress;
+    });
+    // Mark status as loaded to trigger re-render (used in key to force component remount)
+    // This will change the key and force React to re-render the month cards
+    // Use a counter or timestamp to ensure React always sees a change
+    setStatusLoaded(prev => {
+      // Always return a new value to ensure React detects the change
+      return Date.now();
+    });
+  }, [monthSummaries, getMonthViewedStats]);
+
+  // Track when Home screen is focused and reload preferences
   useFocusEffect(
     React.useCallback(() => {
       isHomeFocusedRef.current = true;
+      // Reload preferences when screen comes into focus (in case they were changed in About tab)
+      loadHidePreferences();
+      loadSkinPreference();
+      // Also reload month status on focus to ensure checkmarks show up, especially when liquidglass is not available
+      // Reset statusLoaded to 0 first to ensure re-render happens
+      setStatusLoaded(0);
+      loadMonthStatus();
       return () => {
         isHomeFocusedRef.current = false;
       };
-    }, []),
+    }, [loadMonthStatus]),
   );
 
   const handleCloseMonthSelection = () => {
@@ -380,40 +469,10 @@ const Home: React.FC = () => {
     setSelectedMonthData(null);
   };
 
-  const handleAboutPress = () => {
-    setAboutVisible(true);
-  };
-
-  const handleCloseAbout = () => {
-    setAboutVisible(false);
-    // Reload preferences when About screen closes
-    loadHidePreferences();
-  };
-
-  const handlePreferencesChanged = () => {
-    // Reload preferences immediately when changed
-    loadHidePreferences();
-  };
-
-  const handleHideDuplicates = async () => {
-    const newValue = !hideDuplicates;
-    setHideDuplicates(newValue);
-    await AsyncStorage.setItem('hideDuplicates', JSON.stringify(newValue));
-
-    // Show help message for first time hiding
-    const hasShownHelp = await AsyncStorage.getItem('hasShownHideHelp');
-    if (!hasShownHelp) {
-      Alert.alert(
-        'Hide Filters',
-        'To unhide the filters, just tap the about icon (ℹ️) in the header.',
-        [
-          {
-            text: 'OK',
-            onPress: () => AsyncStorage.setItem('hasShownHideHelp', 'true'),
-          },
-        ],
-      );
-    }
+  const handleToggleTheme = async () => {
+    const newSkin = skin === 'pink' ? 'blue' : 'pink';
+    setSkin(newSkin);
+    await AsyncStorage.setItem('skin', newSkin);
   };
 
   const handleHideTimeFilters = async () => {
@@ -458,6 +517,40 @@ const Home: React.FC = () => {
     }
   };
 
+  // Helper function to find the first unviewed item index (optimized with cache)
+  const findFirstUnviewedIndex = async (
+    items: MediaItem[],
+  ): Promise<number> => {
+    if (items.length === 0) return 0;
+
+    try {
+      // Use cached viewed items if available, otherwise load (will cache for next time)
+      let viewedItems = viewedItemsCacheRef.current;
+      if (!viewedItems) {
+        viewedItems = await loadViewedItems();
+        viewedItemsCacheRef.current = viewedItems;
+      }
+
+      // Find the first item that hasn't been viewed
+      // Early exit optimization: if first item is unviewed, return immediately
+      if (items.length > 0 && !viewedItems.has(items[0].id)) {
+        return 0;
+      }
+
+      // Check remaining items
+      for (let i = 1; i < items.length; i++) {
+        if (!viewedItems.has(items[i].id)) {
+          return i;
+        }
+      }
+
+      // If all items are viewed, start at the beginning
+      return 0;
+    } catch (error) {
+      return 0;
+    }
+  };
+
   const handleSelectPhotos = async () => {
     if (!selectedMonthData) return;
 
@@ -478,7 +571,9 @@ const Home: React.FC = () => {
       const photoItems = monthItems.filter(item => item.type === 'photo');
 
       if (photoItems.length > 0) {
-        setViewerInitialIndex(0);
+        // Find the first unviewed item to start from
+        const startIndex = await findFirstUnviewedIndex(photoItems);
+        setViewerInitialIndex(startIndex);
         setViewerVisible(true);
         setCurrentViewingMonth(selectedMonthData.monthKey);
       } else {
@@ -512,7 +607,9 @@ const Home: React.FC = () => {
       const videoItems = monthItems.filter(item => item.type === 'video');
 
       if (videoItems.length > 0) {
-        setViewerInitialIndex(0);
+        // Find the first unviewed item to start from
+        const startIndex = await findFirstUnviewedIndex(videoItems);
+        setViewerInitialIndex(startIndex);
         setViewerVisible(true);
         setCurrentViewingMonth(selectedMonthData.monthKey);
       } else {
@@ -545,7 +642,9 @@ const Home: React.FC = () => {
       const monthItems = await loadMonthContent(selectedMonthData.monthKey, 40);
 
       if (monthItems.length > 0) {
-        setViewerInitialIndex(0);
+        // Find the first unviewed item to start from
+        const startIndex = await findFirstUnviewedIndex(monthItems);
+        setViewerInitialIndex(startIndex);
         setViewerVisible(true);
         setCurrentViewingMonth(selectedMonthData.monthKey);
       } else {
@@ -681,7 +780,7 @@ const Home: React.FC = () => {
             allItems.push(...items);
           }
         } catch (error) {
-          console.log('Error loading month content:', error);
+          // Error loading month content
         }
       } else {
         allItems.push(...monthContent[relevantMonthKey].items);
@@ -713,9 +812,41 @@ const Home: React.FC = () => {
     }
   };
 
-  const handleViewProgress = (viewedCount: number) => {
-    if (currentViewingMonth && currentViewingMonth !== 'DUPLICATES') {
-      markMonthAsViewed(currentViewingMonth, viewedCount);
+  const handleViewProgress = async (viewedCount: number) => {
+    if (
+      currentViewingMonth &&
+      !currentViewingMonth.startsWith('TIME_FILTER_') &&
+      !currentViewingMonth.startsWith('SOURCE_FILTER_')
+    ) {
+      // Update progress immediately to prevent double counting
+      const stats = await getMonthViewedStats(currentViewingMonth);
+      const remaining = stats.totalCount - stats.viewedCount;
+      const started = stats.viewedCount > 0;
+
+      setMonthViewingProgress(prev => ({
+        ...prev,
+        [currentViewingMonth]: {
+          viewed: stats.viewedCount,
+          total: stats.totalCount,
+          remaining,
+          started,
+        },
+      }));
+
+      // Also check completion status immediately so checkmark appears right away
+      // This is especially important when liquidglass is not available
+      try {
+        const { isMonthCompleted } = await import(
+          '../utils/viewedMediaTracker'
+        );
+        const isCompleted = await isMonthCompleted(currentViewingMonth);
+        setMonthCompletionStatus(prev => ({
+          ...prev,
+          [currentViewingMonth]: isCompleted,
+        }));
+      } catch (error) {
+        // Error checking completion status in handleViewProgress
+      }
     }
   };
 
@@ -759,16 +890,11 @@ const Home: React.FC = () => {
   // Load hide preferences function
   const loadHidePreferences = async () => {
     try {
-      const [duplicatesHidden, timeFiltersHidden, sourceFiltersHidden] =
-        await Promise.all([
-          AsyncStorage.getItem('hideDuplicates'),
-          AsyncStorage.getItem('hideTimeFilters'),
-          AsyncStorage.getItem('hideSourceFilters'),
-        ]);
+      const [timeFiltersHidden, sourceFiltersHidden] = await Promise.all([
+        AsyncStorage.getItem('hideTimeFilters'),
+        AsyncStorage.getItem('hideSourceFilters'),
+      ]);
 
-      if (duplicatesHidden) {
-        setHideDuplicates(JSON.parse(duplicatesHidden));
-      }
       if (timeFiltersHidden) {
         setHideTimeFilters(JSON.parse(timeFiltersHidden));
       }
@@ -776,103 +902,67 @@ const Home: React.FC = () => {
         setHideSourceFilters(JSON.parse(sourceFiltersHidden));
       }
     } catch (error) {
-      console.log('Error loading hide preferences:', error);
+      // Error loading hide preferences
     }
   };
 
-  // Load hide preferences on mount
+  // Load hide preferences and skin preference on mount
   useEffect(() => {
     loadHidePreferences();
+    loadSkinPreference();
   }, []);
 
-  // Load and update month completion status and progress
   useEffect(() => {
-    const loadMonthStatus = async () => {
-      const status: { [monthKey: string]: boolean } = {};
-      const progress: {
-        [monthKey: string]: {
-          viewed: number;
-          total: number;
-          remaining: number;
-          started: boolean;
-        };
-      } = {};
-
-      for (const summary of monthSummaries) {
-        try {
-          // Check completion status
-          const { isMonthCompleted } = await import(
-            '../utils/viewedMediaTracker'
-          );
-          status[summary.monthKey] = await isMonthCompleted(summary.monthKey);
-
-          // Get progress stats
-          const stats = await getMonthViewedStats(summary.monthKey);
-          const started = stats.viewedCount > 0;
-          const remaining = stats.totalCount - stats.viewedCount;
-
-          progress[summary.monthKey] = {
-            viewed: stats.viewedCount,
-            total: stats.totalCount,
-            remaining,
-            started,
-          };
-        } catch (error) {
-          status[summary.monthKey] = false;
-          progress[summary.monthKey] = {
-            viewed: 0,
-            total: 0,
-            remaining: 0,
-            started: false,
-          };
-        }
-      }
-      setMonthCompletionStatus(status);
-      setMonthViewingProgress(progress);
-    };
-
-    if (monthSummaries.length > 0) {
-      loadMonthStatus();
-    }
-  }, [monthSummaries]);
+    loadMonthStatus();
+  }, [loadMonthStatus]);
 
   // Refresh completion status periodically and when content changes
   useEffect(() => {
+    let isRefreshing = false; // Prevent concurrent refreshes
+
     const refreshStatus = async () => {
-      const status: { [monthKey: string]: boolean } = {};
-      const progress: {
-        [monthKey: string]: {
-          viewed: number;
-          total: number;
-          remaining: number;
-          started: boolean;
-        };
-      } = {};
+      // Prevent double counting by skipping if already refreshing
+      if (isRefreshing) return;
+      isRefreshing = true;
 
-      for (const summary of monthSummaries) {
-        try {
-          const { isMonthCompleted } = await import(
-            '../utils/viewedMediaTracker'
-          );
-          status[summary.monthKey] = await isMonthCompleted(summary.monthKey);
-
-          // Get progress stats
-          const stats = await getMonthViewedStats(summary.monthKey);
-          const started = stats.viewedCount > 0;
-          const remaining = stats.totalCount - stats.viewedCount;
-
-          progress[summary.monthKey] = {
-            viewed: stats.viewedCount,
-            total: stats.totalCount,
-            remaining,
-            started,
+      try {
+        const status: { [monthKey: string]: boolean } = {};
+        const progress: {
+          [monthKey: string]: {
+            viewed: number;
+            total: number;
+            remaining: number;
+            started: boolean;
           };
-        } catch (error) {
-          status[summary.monthKey] = false;
+        } = {};
+
+        for (const summary of monthSummaries) {
+          try {
+            const { isMonthCompleted } = await import(
+              '../utils/viewedMediaTracker'
+            );
+            status[summary.monthKey] = await isMonthCompleted(summary.monthKey);
+
+            // Get progress stats
+            const stats = await getMonthViewedStats(summary.monthKey);
+            const started = stats.viewedCount > 0;
+            const remaining = stats.totalCount - stats.viewedCount;
+
+            progress[summary.monthKey] = {
+              viewed: stats.viewedCount,
+              total: stats.totalCount,
+              remaining,
+              started,
+            };
+          } catch (error) {
+            status[summary.monthKey] = false;
+          }
         }
+        setMonthCompletionStatus(prev => ({ ...prev, ...status }));
+        setMonthViewingProgress(prev => ({ ...prev, ...progress }));
+      } finally {
+        isRefreshing = false;
       }
-      setMonthCompletionStatus(prev => ({ ...prev, ...status }));
-      setMonthViewingProgress(prev => ({ ...prev, ...progress }));
     };
 
     // Refresh when viewer closes or periodically
@@ -887,12 +977,29 @@ const Home: React.FC = () => {
         <View style={styles.permissionContainer}>
           <View style={styles.permissionContent}>
             <Text style={styles.permissionIcon}>📱</Text>
-            <Text style={styles.permissionTitle}>Media Access Required</Text>
-            <Text style={styles.permissionText}>
+            <Text
+              style={[
+                styles.permissionTitle,
+                skin === 'blue' && { color: '#ffffff' },
+              ]}
+            >
+              Media Access Required
+            </Text>
+            <Text
+              style={[
+                styles.permissionText,
+                skin === 'blue' && { color: 'rgba(255, 255, 255, 0.9)' },
+              ]}
+            >
               Please grant media permissions to start organizing your photos.
             </Text>
             {Platform.OS === 'ios' && (
-              <Text style={styles.permissionSubtext}>
+              <Text
+                style={[
+                  styles.permissionSubtext,
+                  skin === 'blue' && { color: 'rgba(255, 255, 255, 0.8)' },
+                ]}
+              >
                 On iPad, you may need to retry if you've already granted
                 permission.
               </Text>
@@ -930,13 +1037,25 @@ const Home: React.FC = () => {
 
     return (
       <View style={styles.scanProgressContainer}>
-        <Text style={styles.scanProgressText}>{phaseText}</Text>
+        <Text
+          style={[
+            styles.scanProgressText,
+            skin === 'blue' && { color: '#ffffff' },
+          ]}
+        >
+          {phaseText}
+        </Text>
         <View style={styles.scanProgressBar}>
           <View
             style={[styles.scanProgressFill, { width: `${percentage}%` }]}
           />
         </View>
-        <Text style={styles.scanProgressCounter}>
+        <Text
+          style={[
+            styles.scanProgressCounter,
+            skin === 'blue' && { color: 'rgba(255, 255, 255, 0.8)' },
+          ]}
+        >
           {current} / {total} ({percentage}%)
         </Text>
       </View>
@@ -945,13 +1064,7 @@ const Home: React.FC = () => {
 
   // Get the items to show in the viewer
   let viewerItems: MediaItem[] = [];
-  if (currentViewingMonth === 'DUPLICATES') {
-    // For duplicates, show all items regardless of media type filter
-    viewerItems = duplicateItems;
-  } else if (
-    currentViewingMonth &&
-    currentViewingMonth.startsWith('TIME_FILTER_')
-  ) {
+  if (currentViewingMonth && currentViewingMonth.startsWith('TIME_FILTER_')) {
     // For time filters, use the pre-filtered items
     viewerItems = timeFilterItems;
   } else if (
@@ -1007,12 +1120,16 @@ const Home: React.FC = () => {
     }
   }
 
+  const backgroundImage =
+    skin === 'blue' ? backgroundImageBlue : backgroundImagePink;
+
   return (
     <ImageBackground
       source={backgroundImage}
       style={styles.backgroundImage}
       resizeMode="cover"
     >
+      {skin === 'blue' && <View style={styles.blueTintOverlay} />}
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" />
 
@@ -1020,14 +1137,24 @@ const Home: React.FC = () => {
         <View style={styles.headerContainer}>
           <View style={styles.header}>
             <View style={styles.headerInfo}>
-              <Text style={styles.headerTitle}>KeepFlick</Text>
+              <Image
+                source={keepFlickIcon}
+                style={styles.headerIcon}
+                resizeMode="contain"
+              />
             </View>
             <View style={styles.rightSection}>
               <TouchableOpacity
-                style={styles.aboutButton}
-                onPress={handleAboutPress}
+                style={[
+                  styles.themeToggleButton,
+                  skin === 'pink'
+                    ? { backgroundColor: '#4A90E2' }
+                    : { backgroundColor: '#FFB3C1' },
+                ]}
+                onPress={handleToggleTheme}
+                activeOpacity={0.7}
               >
-                <Text style={styles.aboutButtonText}>ℹ️</Text>
+                <Text style={styles.themeToggleText}>Theme</Text>
               </TouchableOpacity>
               {!isSmallScreen && (
                 <TouchableOpacity
@@ -1040,21 +1167,23 @@ const Home: React.FC = () => {
                   </Text>
                 </TouchableOpacity>
               )}
-              <View
-                style={[
-                  styles.viewingLimitsBadge,
-                  isSmallScreen && styles.viewingLimitsBadgeMobile,
-                ]}
-              >
-                <Text
+              {!isPremiumUser && (
+                <View
                   style={[
-                    styles.viewingLimitsText,
-                    isSmallScreen && styles.viewingLimitsTextMobile,
+                    styles.viewingLimitsBadge,
+                    isSmallScreen && styles.viewingLimitsBadgeMobile,
                   ]}
                 >
-                  {viewingLimits.remainingViews} views left
-                </Text>
-              </View>
+                  <Text
+                    style={[
+                      styles.viewingLimitsText,
+                      isSmallScreen && styles.viewingLimitsTextMobile,
+                    ]}
+                  >
+                    {viewingLimits.remainingViews} views left
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
         </View>
@@ -1066,16 +1195,38 @@ const Home: React.FC = () => {
         {isLoading && monthSummaries.length === 0 ? (
           <View style={styles.loadingContainer}>
             <View style={styles.loadingContent}>
-              <ActivityIndicator size="large" color="#1a1a1a" />
-              <Text style={styles.loadingText}>Scanning your photos...</Text>
+              <ActivityIndicator
+                size="large"
+                color={skin === 'blue' ? '#ffffff' : '#1a1a1a'}
+              />
+              <Text
+                style={[
+                  styles.loadingText,
+                  skin === 'blue' && { color: '#ffffff' },
+                ]}
+              >
+                Scanning your photos...
+              </Text>
             </View>
           </View>
         ) : monthSummaries.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyContent}>
               <Text style={styles.emptyIcon}>📸</Text>
-              <Text style={styles.emptyTitle}>No Media Found</Text>
-              <Text style={styles.emptyText}>
+              <Text
+                style={[
+                  styles.emptyTitle,
+                  skin === 'blue' && { color: '#ffffff' },
+                ]}
+              >
+                No Media Found
+              </Text>
+              <Text
+                style={[
+                  styles.emptyText,
+                  skin === 'blue' && { color: 'rgba(255, 255, 255, 0.9)' },
+                ]}
+              >
                 No media found on your device
               </Text>
             </View>
@@ -1094,299 +1245,180 @@ const Home: React.FC = () => {
               showsVerticalScrollIndicator={false}
             >
               {/* Special Filters Section */}
-              <View style={styles.specialFiltersContainer}>
-                <TouchableOpacity
-                  style={styles.specialFiltersHeaderRow}
-                  onPress={() =>
-                    setSpecialFiltersCollapsed(!specialFiltersCollapsed)
-                  }
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.specialFiltersHeaderText}>
-                    Special Filters
-                  </Text>
-                  <Text style={styles.specialFiltersChevron}>
-                    {specialFiltersCollapsed ? '⌄' : '⌃'}
-                  </Text>
-                </TouchableOpacity>
+              {false && (
+                <View style={styles.specialFiltersContainer}>
+                  <TouchableOpacity
+                    style={styles.specialFiltersHeaderRow}
+                    onPress={() =>
+                      setSpecialFiltersCollapsed(!specialFiltersCollapsed)
+                    }
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.specialFiltersHeaderText,
+                        skin === 'blue' && { color: '#ffffff' },
+                      ]}
+                    >
+                      Special Filters
+                    </Text>
+                    <Text
+                      style={[
+                        styles.specialFiltersChevron,
+                        skin === 'blue' && { color: '#ffffff' },
+                      ]}
+                    >
+                      {specialFiltersCollapsed ? '⌄' : '⌃'}
+                    </Text>
+                  </TouchableOpacity>
 
-                {!specialFiltersCollapsed && (
-                  <>
-                    {/* Duplicates group */}
-                    <View style={styles.filterGroup}>
-                      <View style={styles.groupHeaderRow}>
-                        <Text style={styles.groupTitle}>Duplicates</Text>
-                        <TouchableOpacity
-                          style={styles.hideButton}
-                          onPress={handleHideDuplicates}
-                        >
+                  {!specialFiltersCollapsed && (
+                    <>
+                      {/* Recent group */}
+                      <View style={styles.filterGroup}>
+                        <View style={styles.groupHeaderRow}>
                           <Text
                             style={[
-                              styles.hideButtonText,
-                              isSmallScreen && styles.hideButtonTextMobile,
+                              styles.groupTitle,
+                              skin === 'blue' && { color: '#ffffff' },
                             ]}
                           >
-                            {hideDuplicates
-                              ? '👁️'
-                              : isSmallScreen
-                              ? '🚫'
-                              : 'Hide'}
+                            Recent
                           </Text>
-                        </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.hideButton}
+                            onPress={handleHideTimeFilters}
+                          >
+                            <Text
+                              style={[
+                                styles.hideButtonText,
+                                isSmallScreen && styles.hideButtonTextMobile,
+                              ]}
+                            >
+                              {hideTimeFilters
+                                ? '👁️'
+                                : isSmallScreen
+                                ? '🚫'
+                                : 'Hide'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        {!hideTimeFilters &&
+                          (isLiquidGlassSupported ? (
+                            <LiquidGlassView
+                              style={styles.groupCardGradient}
+                              interactive
+                              effect="clear"
+                            >
+                              <View style={styles.groupCardInner}>
+                                <View style={styles.groupCardContent}>
+                                  <View style={styles.groupIconCircle}>
+                                    <Text style={styles.groupIcon}>📆</Text>
+                                  </View>
+                                  <View style={styles.groupTextCol}>
+                                    <Text style={styles.groupPrimary}>
+                                      Quick time filters
+                                    </Text>
+                                    <Text style={styles.groupSecondary}>
+                                      Today • Yesterday
+                                    </Text>
+                                  </View>
+                                </View>
+                                <View style={styles.chipRow}>
+                                  <TouchableOpacity
+                                    style={styles.chipButton}
+                                    onPress={() =>
+                                      handleTimeFilterPress('today')
+                                    }
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.chipText,
+                                        skin === 'blue' && { color: '#000000' },
+                                      ]}
+                                    >
+                                      Today
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={styles.chipButton}
+                                    onPress={() =>
+                                      handleTimeFilterPress('yesterday')
+                                    }
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.chipText,
+                                        skin === 'blue' && { color: '#000000' },
+                                      ]}
+                                    >
+                                      Yesterday
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            </LiquidGlassView>
+                          ) : (
+                            <LinearGradient
+                              colors={gradientPalette.lightBlue}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 0 }}
+                              style={styles.groupCardGradient}
+                            >
+                              <View style={styles.groupCardInner}>
+                                <View style={styles.groupCardContent}>
+                                  <View style={styles.groupIconCircle}>
+                                    <Text style={styles.groupIcon}>📆</Text>
+                                  </View>
+                                  <View style={styles.groupTextCol}>
+                                    <Text style={styles.groupPrimary}>
+                                      Quick time filters
+                                    </Text>
+                                    <Text style={styles.groupSecondary}>
+                                      Today • Yesterday
+                                    </Text>
+                                  </View>
+                                </View>
+                                <View style={styles.chipRow}>
+                                  <TouchableOpacity
+                                    style={styles.chipButton}
+                                    onPress={() =>
+                                      handleTimeFilterPress('today')
+                                    }
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.chipText,
+                                        skin === 'blue' && { color: '#000000' },
+                                      ]}
+                                    >
+                                      Today
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={styles.chipButton}
+                                    onPress={() =>
+                                      handleTimeFilterPress('yesterday')
+                                    }
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.chipText,
+                                        skin === 'blue' && { color: '#000000' },
+                                      ]}
+                                    >
+                                      Yesterday
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            </LinearGradient>
+                          ))}
                       </View>
-
-                      {!hideDuplicates &&
-                        (isLiquidGlassSupported ? (
-                          <LiquidGlassView
-                            style={styles.groupCardGradient}
-                            effect="clear"
-                            interactive={false}
-                          >
-                            <View style={styles.groupCardInner}>
-                              <View style={styles.groupCardContent}>
-                                <View style={styles.groupIconCircle}>
-                                  <Text style={styles.groupIcon}>♻️</Text>
-                                </View>
-                                <View style={styles.groupTextCol}>
-                                  <Text style={styles.groupPrimary}>
-                                    Find and review duplicates
-                                  </Text>
-                                  <Text style={styles.groupSecondary}>
-                                    {
-                                      duplicateItems.filter(
-                                        i => i.type === 'photo',
-                                      ).length
-                                    }{' '}
-                                    photos •{' '}
-                                    {
-                                      duplicateItems.filter(
-                                        i => i.type === 'video',
-                                      ).length
-                                    }{' '}
-                                    videos
-                                  </Text>
-                                </View>
-                              </View>
-                              <View style={styles.chipRow}>
-                                <TouchableOpacity
-                                  style={[
-                                    styles.chipButton,
-                                    duplicateItems.filter(
-                                      i => i.type === 'photo',
-                                    ).length === 0 && styles.chipDisabled,
-                                  ]}
-                                  onPress={() =>
-                                    handleDuplicateTypePress('photos')
-                                  }
-                                  disabled={
-                                    duplicateItems.filter(
-                                      i => i.type === 'photo',
-                                    ).length === 0
-                                  }
-                                >
-                                  <Text style={styles.chipText}>Photos</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={[
-                                    styles.chipButton,
-                                    duplicateItems.filter(
-                                      i => i.type === 'video',
-                                    ).length === 0 && styles.chipDisabled,
-                                  ]}
-                                  onPress={() =>
-                                    handleDuplicateTypePress('videos')
-                                  }
-                                  disabled={
-                                    duplicateItems.filter(
-                                      i => i.type === 'video',
-                                    ).length === 0
-                                  }
-                                >
-                                  <Text style={styles.chipText}>Videos</Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                          </LiquidGlassView>
-                        ) : (
-                          <LinearGradient
-                            colors={gradientPalette.lightPurple}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={styles.groupCardGradient}
-                          >
-                            <View style={styles.groupCardInner}>
-                              <View style={styles.groupCardContent}>
-                                <View style={styles.groupIconCircle}>
-                                  <Text style={styles.groupIcon}>♻️</Text>
-                                </View>
-                                <View style={styles.groupTextCol}>
-                                  <Text style={styles.groupPrimary}>
-                                    Find and review duplicates
-                                  </Text>
-                                  <Text style={styles.groupSecondary}>
-                                    {
-                                      duplicateItems.filter(
-                                        i => i.type === 'photo',
-                                      ).length
-                                    }{' '}
-                                    photos •{' '}
-                                    {
-                                      duplicateItems.filter(
-                                        i => i.type === 'video',
-                                      ).length
-                                    }{' '}
-                                    videos
-                                  </Text>
-                                </View>
-                              </View>
-                              <View style={styles.chipRow}>
-                                <TouchableOpacity
-                                  style={[
-                                    styles.chipButton,
-                                    duplicateItems.filter(
-                                      i => i.type === 'photo',
-                                    ).length === 0 && styles.chipDisabled,
-                                  ]}
-                                  onPress={() =>
-                                    handleDuplicateTypePress('photos')
-                                  }
-                                  disabled={
-                                    duplicateItems.filter(
-                                      i => i.type === 'photo',
-                                    ).length === 0
-                                  }
-                                >
-                                  <Text style={styles.chipText}>Photos</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={[
-                                    styles.chipButton,
-                                    duplicateItems.filter(
-                                      i => i.type === 'video',
-                                    ).length === 0 && styles.chipDisabled,
-                                  ]}
-                                  onPress={() =>
-                                    handleDuplicateTypePress('videos')
-                                  }
-                                  disabled={
-                                    duplicateItems.filter(
-                                      i => i.type === 'video',
-                                    ).length === 0
-                                  }
-                                >
-                                  <Text style={styles.chipText}>Videos</Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                          </LinearGradient>
-                        ))}
-                    </View>
-
-                    {/* Recent group */}
-                    <View style={styles.filterGroup}>
-                      <View style={styles.groupHeaderRow}>
-                        <Text style={styles.groupTitle}>Recent</Text>
-                        <TouchableOpacity
-                          style={styles.hideButton}
-                          onPress={handleHideTimeFilters}
-                        >
-                          <Text
-                            style={[
-                              styles.hideButtonText,
-                              isSmallScreen && styles.hideButtonTextMobile,
-                            ]}
-                          >
-                            {hideTimeFilters
-                              ? '👁️'
-                              : isSmallScreen
-                              ? '🚫'
-                              : 'Hide'}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                      {!hideTimeFilters &&
-                        (isLiquidGlassSupported ? (
-                          <LiquidGlassView
-                            style={styles.groupCardGradient}
-                            effect="clear"
-                            interactive={false}
-                          >
-                            <View style={styles.groupCardInner}>
-                              <View style={styles.groupCardContent}>
-                                <View style={styles.groupIconCircle}>
-                                  <Text style={styles.groupIcon}>📆</Text>
-                                </View>
-                                <View style={styles.groupTextCol}>
-                                  <Text style={styles.groupPrimary}>
-                                    Quick time filters
-                                  </Text>
-                                  <Text style={styles.groupSecondary}>
-                                    Today • Yesterday
-                                  </Text>
-                                </View>
-                              </View>
-                              <View style={styles.chipRow}>
-                                <TouchableOpacity
-                                  style={styles.chipButton}
-                                  onPress={() => handleTimeFilterPress('today')}
-                                >
-                                  <Text style={styles.chipText}>Today</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={styles.chipButton}
-                                  onPress={() =>
-                                    handleTimeFilterPress('yesterday')
-                                  }
-                                >
-                                  <Text style={styles.chipText}>Yesterday</Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                          </LiquidGlassView>
-                        ) : (
-                          <LinearGradient
-                            colors={gradientPalette.lightBlue}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={styles.groupCardGradient}
-                          >
-                            <View style={styles.groupCardInner}>
-                              <View style={styles.groupCardContent}>
-                                <View style={styles.groupIconCircle}>
-                                  <Text style={styles.groupIcon}>📆</Text>
-                                </View>
-                                <View style={styles.groupTextCol}>
-                                  <Text style={styles.groupPrimary}>
-                                    Quick time filters
-                                  </Text>
-                                  <Text style={styles.groupSecondary}>
-                                    Today • Yesterday
-                                  </Text>
-                                </View>
-                              </View>
-                              <View style={styles.chipRow}>
-                                <TouchableOpacity
-                                  style={styles.chipButton}
-                                  onPress={() => handleTimeFilterPress('today')}
-                                >
-                                  <Text style={styles.chipText}>Today</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={styles.chipButton}
-                                  onPress={() =>
-                                    handleTimeFilterPress('yesterday')
-                                  }
-                                >
-                                  <Text style={styles.chipText}>Yesterday</Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                          </LinearGradient>
-                        ))}
-                    </View>
-                  </>
-                )}
-              </View>
+                    </>
+                  )}
+                </View>
+              )}
 
               {/* Month Filter Cards */}
               <View style={styles.monthFilterCardsContainer}>
@@ -1398,49 +1430,15 @@ const Home: React.FC = () => {
                   onPress={() => setMonthFilter('all')}
                   activeOpacity={0.7}
                 >
-                  {isLiquidGlassSupported ? (
-                    <LiquidGlassView
-                      style={styles.monthFilterCardGradient}
-                      effect="clear"
-                      interactive={false}
-                    >
-                      <Text
-                        style={[
-                          styles.monthFilterCardText,
-                          monthFilter === 'all' &&
-                            styles.monthFilterCardTextActive,
-                        ]}
-                      >
-                        Show all
-                      </Text>
-                      {monthFilter === 'all' && (
-                        <View style={styles.monthFilterCardUnderline} />
-                      )}
-                    </LiquidGlassView>
-                  ) : (
-                    <LinearGradient
-                      colors={[
-                        'rgba(255, 255, 255, 0.1)',
-                        'rgba(255, 255, 255, 0.05)',
-                      ]}
-                      style={styles.monthFilterCardGradient}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                    >
-                      <Text
-                        style={[
-                          styles.monthFilterCardText,
-                          monthFilter === 'all' &&
-                            styles.monthFilterCardTextActive,
-                        ]}
-                      >
-                        Show all
-                      </Text>
-                      {monthFilter === 'all' && (
-                        <View style={styles.monthFilterCardUnderline} />
-                      )}
-                    </LinearGradient>
-                  )}
+                  <Text
+                    style={[
+                      styles.monthFilterCardText,
+                      monthFilter === 'all' && styles.monthFilterCardTextActive,
+                      skin === 'blue' && { color: '#ffffff' },
+                    ]}
+                  >
+                    Show all
+                  </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1452,49 +1450,16 @@ const Home: React.FC = () => {
                   onPress={() => setMonthFilter('needToFinish')}
                   activeOpacity={0.7}
                 >
-                  {isLiquidGlassSupported ? (
-                    <LiquidGlassView
-                      style={styles.monthFilterCardGradient}
-                      effect="clear"
-                      interactive={false}
-                    >
-                      <Text
-                        style={[
-                          styles.monthFilterCardText,
-                          monthFilter === 'needToFinish' &&
-                            styles.monthFilterCardTextActive,
-                        ]}
-                      >
-                        Need to finish
-                      </Text>
-                      {monthFilter === 'needToFinish' && (
-                        <View style={styles.monthFilterCardUnderline} />
-                      )}
-                    </LiquidGlassView>
-                  ) : (
-                    <LinearGradient
-                      colors={[
-                        'rgba(255, 255, 255, 0.1)',
-                        'rgba(255, 255, 255, 0.05)',
-                      ]}
-                      style={styles.monthFilterCardGradient}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                    >
-                      <Text
-                        style={[
-                          styles.monthFilterCardText,
-                          monthFilter === 'needToFinish' &&
-                            styles.monthFilterCardTextActive,
-                        ]}
-                      >
-                        Need to finish
-                      </Text>
-                      {monthFilter === 'needToFinish' && (
-                        <View style={styles.monthFilterCardUnderline} />
-                      )}
-                    </LinearGradient>
-                  )}
+                  <Text
+                    style={[
+                      styles.monthFilterCardText,
+                      monthFilter === 'needToFinish' &&
+                        styles.monthFilterCardTextActive,
+                      skin === 'blue' && { color: '#ffffff' },
+                    ]}
+                  >
+                    Need to finish
+                  </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1506,49 +1471,16 @@ const Home: React.FC = () => {
                   onPress={() => setMonthFilter('notStarted')}
                   activeOpacity={0.7}
                 >
-                  {isLiquidGlassSupported ? (
-                    <LiquidGlassView
-                      style={styles.monthFilterCardGradient}
-                      effect="clear"
-                      interactive={false}
-                    >
-                      <Text
-                        style={[
-                          styles.monthFilterCardText,
-                          monthFilter === 'notStarted' &&
-                            styles.monthFilterCardTextActive,
-                        ]}
-                      >
-                        Not started only
-                      </Text>
-                      {monthFilter === 'notStarted' && (
-                        <View style={styles.monthFilterCardUnderline} />
-                      )}
-                    </LiquidGlassView>
-                  ) : (
-                    <LinearGradient
-                      colors={[
-                        'rgba(255, 255, 255, 0.1)',
-                        'rgba(255, 255, 255, 0.05)',
-                      ]}
-                      style={styles.monthFilterCardGradient}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                    >
-                      <Text
-                        style={[
-                          styles.monthFilterCardText,
-                          monthFilter === 'notStarted' &&
-                            styles.monthFilterCardTextActive,
-                        ]}
-                      >
-                        Not started only
-                      </Text>
-                      {monthFilter === 'notStarted' && (
-                        <View style={styles.monthFilterCardUnderline} />
-                      )}
-                    </LinearGradient>
-                  )}
+                  <Text
+                    style={[
+                      styles.monthFilterCardText,
+                      monthFilter === 'notStarted' &&
+                        styles.monthFilterCardTextActive,
+                      skin === 'blue' && { color: '#ffffff' },
+                    ]}
+                  >
+                    Not started
+                  </Text>
                 </TouchableOpacity>
               </View>
 
@@ -1579,8 +1511,14 @@ const Home: React.FC = () => {
                   const originalIndex = monthSummaries.findIndex(
                     m => m.monthKey === summary.monthKey,
                   );
+                  // Use frosty colors for all months when liquid glass is unavailable
+                  // Pink theme -> frosty blue, Blue theme -> frosty pink
                   const gradientColors =
-                    monthGradients[originalIndex % monthGradients.length];
+                    !isLiquidGlassSupported && skin === 'pink'
+                      ? gradientPalette.frostyBlue
+                      : !isLiquidGlassSupported && skin === 'blue'
+                      ? gradientPalette.frostyPink
+                      : monthGradients[originalIndex % monthGradients.length];
                   const isCompleted = monthCompletionStatus[summary.monthKey];
                   const progress = monthViewingProgress[summary.monthKey];
                   const showProgress =
@@ -1588,15 +1526,15 @@ const Home: React.FC = () => {
 
                   return (
                     <TouchableOpacity
-                      key={summary.monthKey}
+                      key={`${summary.monthKey}-${statusLoaded}`}
                       style={styles.monthCard}
                       onPress={() => handleMonthPress(summary.monthKey)}
                     >
                       {isLiquidGlassSupported ? (
                         <LiquidGlassView
                           style={styles.monthCardGradient}
+                          interactive
                           effect="clear"
-                          interactive={false}
                         >
                           <View style={styles.monthCardContent}>
                             <View style={styles.monthInfo}>
@@ -1608,6 +1546,7 @@ const Home: React.FC = () => {
                                       Platform.OS === 'ios' && {
                                         color: PlatformColor('labelColor'),
                                       },
+                                      skin === 'blue' && { color: '#ffffff' },
                                     ]}
                                   >
                                     {summary.monthName}
@@ -1618,7 +1557,13 @@ const Home: React.FC = () => {
                                     </Text>
                                   )}
                                   {showProgress && (
-                                    <Text style={styles.progressBadge}>
+                                    <Text
+                                      style={[
+                                        styles.progressBadge,
+                                        skin === 'pink' &&
+                                          styles.progressBadgePink,
+                                      ]}
+                                    >
                                       {progress.remaining} left
                                     </Text>
                                   )}
@@ -1633,6 +1578,7 @@ const Home: React.FC = () => {
                                   Platform.OS === 'ios' && {
                                     color: PlatformColor('labelColor'),
                                   },
+                                  skin === 'blue' && { color: '#ffffff' },
                                 ]}
                               >
                                 ›
@@ -1651,16 +1597,27 @@ const Home: React.FC = () => {
                             <View style={styles.monthInfo}>
                               <View style={styles.monthTitleRow}>
                                 <View style={styles.monthTitleContainer}>
-                                  <Text style={styles.monthTitle}>
+                                  <Text
+                                    style={[
+                                      styles.monthTitle,
+                                      skin === 'blue' && { color: '#ffffff' },
+                                    ]}
+                                  >
                                     {summary.monthName}
                                   </Text>
-                                  {monthCompletionStatus[summary.monthKey] && (
+                                  {isCompleted && (
                                     <Text style={styles.completedCheckmark}>
                                       ✓
                                     </Text>
                                   )}
                                   {showProgress && (
-                                    <Text style={styles.progressBadge}>
+                                    <Text
+                                      style={[
+                                        styles.progressBadge,
+                                        skin === 'pink' &&
+                                          styles.progressBadgePink,
+                                      ]}
+                                    >
                                       {progress.remaining} left
                                     </Text>
                                   )}
@@ -1669,7 +1626,14 @@ const Home: React.FC = () => {
                             </View>
 
                             <View style={styles.monthRight}>
-                              <Text style={styles.monthChevron}>›</Text>
+                              <Text
+                                style={[
+                                  styles.monthChevron,
+                                  skin === 'blue' && { color: '#ffffff' },
+                                ]}
+                              >
+                                ›
+                              </Text>
                             </View>
                           </View>
                         </LinearGradient>
@@ -1678,7 +1642,12 @@ const Home: React.FC = () => {
                   );
                 })}
 
-              <View style={styles.bottomSpacing} />
+              <View
+                style={[
+                  styles.bottomSpacing,
+                  { height: Math.max(insets.bottom, 32) + 60 },
+                ]}
+              />
             </ScrollView>
           </View>
         )}
@@ -1703,32 +1672,11 @@ const Home: React.FC = () => {
             onViewProgress={handleViewProgress}
             monthKey={currentViewingMonth}
             totalCount={
-              currentViewingMonth === 'DUPLICATES'
-                ? duplicateItems.length
-                : monthSummaries.find(m => m.monthKey === currentViewingMonth)
-                    ?.totalCount || viewerItems.length
+              monthSummaries.find(m => m.monthKey === currentViewingMonth)
+                ?.totalCount || viewerItems.length
             }
           />
         )}
-
-        {/* About Modal */}
-        {aboutVisible && (
-          <About
-            onClose={handleCloseAbout}
-            onPreferencesChanged={handlePreferencesChanged}
-          />
-        )}
-
-        {/* Banner Ad Component */}
-        <BannerAdComponent
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            zIndex: 1000,
-          }}
-        />
       </SafeAreaView>
     </ImageBackground>
   );
@@ -1765,7 +1713,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     fontWeight: '800',
-    color: '#ffffff',
+    color: '#000000',
     marginBottom: 4,
     textDecorationLine: 'underline',
     textDecorationColor: '#00D9FF',
@@ -1773,9 +1721,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 3,
     borderBottomColor: '#00D9FF',
   },
+  headerIcon: {
+    width: 150,
+    height: 50,
+    marginBottom: 4,
+  },
   headerSubtitle: {
     fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(0, 0, 0, 0.7)',
     fontWeight: '600',
   },
   rightSection: {
@@ -1795,7 +1748,7 @@ const styles = StyleSheet.create({
   refreshButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#ffffff',
+    color: '#000000',
   },
   viewingLimitsBadge: {
     backgroundColor: 'rgba(0, 217, 255, 0.2)',
@@ -1944,6 +1897,7 @@ const styles = StyleSheet.create({
   monthCardGradient: {
     padding: 16,
     minHeight: 88,
+    borderRadius: 12,
   },
   monthCardContent: {
     flexDirection: 'row',
@@ -1966,7 +1920,7 @@ const styles = StyleSheet.create({
   monthTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#ffffff',
+    color: '#000000',
   },
   completedCheckmark: {
     fontSize: 16,
@@ -1988,16 +1942,22 @@ const styles = StyleSheet.create({
   progressBadge: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#FFD700',
-    backgroundColor: 'rgba(255, 215, 0, 0.25)',
+    color: '#00D9FF',
+    backgroundColor: 'rgba(0, 217, 255, 0.25)',
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderWidth: 1.5,
-    borderColor: '#FFD700',
-    textShadowColor: 'rgba(255, 215, 0, 0.5)',
+    borderColor: '#00D9FF',
+    textShadowColor: 'rgba(0, 217, 255, 0.5)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
+  },
+  progressBadgePink: {
+    color: '#4A90E2',
+    backgroundColor: 'rgba(74, 144, 226, 0.25)',
+    borderColor: '#4A90E2',
+    textShadowColor: 'rgba(74, 144, 226, 0.5)',
   },
   monthCount: {
     fontSize: 14,
@@ -2009,7 +1969,7 @@ const styles = StyleSheet.create({
   },
   monthChevron: {
     fontSize: 28,
-    color: '#ffffff',
+    color: '#000000',
     fontWeight: '300',
   },
   monthProgressContainer: {
@@ -2038,7 +1998,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: '#ffffff',
+    color: '#000000',
     marginTop: 16,
     textAlign: 'center',
     fontWeight: '600',
@@ -2067,7 +2027,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#ffffff',
+    color: '#000000',
     marginBottom: 12,
     textShadowColor: 'rgba(0, 217, 255, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
@@ -2075,7 +2035,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(0, 0, 0, 0.7)',
     textAlign: 'center',
     lineHeight: 24,
     fontWeight: '500',
@@ -2104,7 +2064,7 @@ const styles = StyleSheet.create({
   permissionTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#ffffff',
+    color: '#000000',
     marginBottom: 12,
     textShadowColor: 'rgba(0, 217, 255, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
@@ -2112,14 +2072,14 @@ const styles = StyleSheet.create({
   },
   permissionText: {
     fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(0, 0, 0, 0.7)',
     textAlign: 'center',
     lineHeight: 24,
     fontWeight: '500',
   },
   permissionSubtext: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(0, 0, 0, 0.7)',
     marginTop: 10,
     textAlign: 'center',
     fontWeight: '500',
@@ -2150,7 +2110,7 @@ const styles = StyleSheet.create({
   scanProgressText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#ffffff',
+    color: '#000000',
     marginBottom: 8,
   },
   scanProgressBar: {
@@ -2167,7 +2127,7 @@ const styles = StyleSheet.create({
   },
   scanProgressCounter: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(0, 0, 0, 0.7)',
     marginTop: 8,
   },
   duplicateCardsContainer: {
@@ -2277,7 +2237,7 @@ const styles = StyleSheet.create({
   },
   duplicateSubtext: {
     fontSize: 14,
-    color: '#ffffff',
+    color: '#000000',
     marginTop: 4,
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 0, height: 1 },
@@ -2312,17 +2272,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1a1a1a',
   },
-  aboutButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  themeToggleButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,
   },
-  aboutButtonText: {
-    fontSize: 16,
+  themeToggleText: {
+    color: '#ffffff',
+    fontSize: 14,
     fontWeight: '600',
   },
   duplicateCardsRow: {
@@ -2355,12 +2315,12 @@ const styles = StyleSheet.create({
   hideButtonText: {
     fontSize: 10,
     fontWeight: '500',
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(0, 0, 0, 0.7)',
   },
   hideButtonTextMobile: {
     fontSize: 14,
     fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: 'rgba(0, 0, 0, 0.8)',
   },
   timeFilterButtonsRow: {
     width: '80%',
@@ -2414,12 +2374,12 @@ const styles = StyleSheet.create({
   specialFiltersHeaderText: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#ffffff',
+    color: '#000000',
   },
   specialFiltersChevron: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#ffffff',
+    color: '#000000',
   },
   filterGroup: {
     marginBottom: 8,
@@ -2431,7 +2391,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   groupTitle: {
-    color: '#ffffff',
+    color: '#000000',
     fontSize: 14,
     fontWeight: '800',
   },
@@ -2461,12 +2421,12 @@ const styles = StyleSheet.create({
   groupIcon: { fontSize: 18, lineHeight: 20 },
   groupTextCol: { flex: 1 },
   groupPrimary: {
-    color: '#ffffff',
+    color: '#000000',
     fontSize: 15,
     fontWeight: '800',
   },
   groupSecondary: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(0, 0, 0, 0.7)',
     fontSize: 12,
     fontWeight: '600',
     marginTop: 2,
@@ -2489,56 +2449,53 @@ const styles = StyleSheet.create({
   },
   chipDisabled: { opacity: 0.5 },
   chipText: {
-    color: '#ffffff',
+    color: '#000000',
     fontSize: 12,
     fontWeight: '700',
   },
   monthFilterCardsContainer: {
     flexDirection: 'row',
-    marginHorizontal: 20,
+    marginHorizontal: 16,
     marginVertical: 12,
     gap: 8,
   },
   monthFilterCard: {
     flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  monthFilterCardActive: {
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 5,
-  },
-  monthFilterCardGradient: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    minHeight: 44,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: '#00D9FF',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    elevation: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'relative',
+    minHeight: 60,
+  },
+  monthFilterCardActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(0, 217, 255, 0.3)',
+    shadowOpacity: 0.5,
   },
   monthFilterCardText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#000000',
     textAlign: 'center',
   },
   monthFilterCardTextActive: {
     color: '#00D9FF',
   },
-  monthFilterCardUnderline: {
+  blueTintOverlay: {
     position: 'absolute',
-    bottom: 8,
-    left: '20%',
-    right: '20%',
-    height: 2,
-    backgroundColor: '#00D9FF',
-    borderRadius: 1,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(230, 240, 248, 0.22)',
   },
 });
 
@@ -2591,7 +2548,7 @@ const getResponsiveFilterStyles = (
       duplicateTitle: {
         fontSize: 16,
         fontWeight: '700' as const,
-        color: '#ffffff',
+        color: '#000000',
         textShadowColor: 'rgba(0, 0, 0, 0.3)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 2,
@@ -2599,7 +2556,7 @@ const getResponsiveFilterStyles = (
       duplicateCount: {
         fontSize: 14,
         fontWeight: '600' as const,
-        color: '#ffffff',
+        color: '#000000',
         textShadowColor: 'rgba(0, 0, 0, 0.3)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 2,
@@ -2650,7 +2607,7 @@ const getResponsiveFilterStyles = (
         duplicateTitle: {
           fontSize: 12,
           fontWeight: '700' as const,
-          color: '#ffffff',
+          color: '#000000',
           textShadowColor: 'rgba(0, 0, 0, 0.3)',
           textShadowOffset: { width: 0, height: 1 },
           textShadowRadius: 2,
@@ -2658,7 +2615,7 @@ const getResponsiveFilterStyles = (
         duplicateCount: {
           fontSize: 10,
           fontWeight: '600' as const,
-          color: '#ffffff',
+          color: '#000000',
           textShadowColor: 'rgba(0, 0, 0, 0.3)',
           textShadowOffset: { width: 0, height: 1 },
           textShadowRadius: 2,
@@ -2707,7 +2664,7 @@ const getResponsiveFilterStyles = (
         duplicateTitle: {
           fontSize: 14,
           fontWeight: '700' as const,
-          color: '#ffffff',
+          color: '#000000',
           textShadowColor: 'rgba(0, 0, 0, 0.3)',
           textShadowOffset: { width: 0, height: 1 },
           textShadowRadius: 2,
@@ -2715,7 +2672,7 @@ const getResponsiveFilterStyles = (
         duplicateCount: {
           fontSize: 12,
           fontWeight: '600' as const,
-          color: '#ffffff',
+          color: '#000000',
           textShadowColor: 'rgba(0, 0, 0, 0.3)',
           textShadowOffset: { width: 0, height: 1 },
           textShadowRadius: 2,

@@ -17,12 +17,12 @@ class BannerAdManager {
   private isPremiumUser = false;
   private isAdCurrentlyShowing = false;
   private onAdShownCallback: (() => void) | null = null;
+  private onAdHiddenCallback: (() => void) | null = null;
 
   // Automatically use test ID in development, production ID in release
-  private readonly AD_UNIT_ID =
-    process.env.NODE_ENV === 'development'
-      ? 'ca-app-pub-3940256099942544/6300978111' // Test banner ad unit ID
-      : 'ca-app-pub-5483809755530109/7907237492';
+  private readonly AD_UNIT_ID = __DEV__
+    ? 'ca-app-pub-3940256099942544/6300978111' // Test banner ad unit ID
+    : 'ca-app-pub-5483809755530109/7907237492'; // Production banner ad unit ID
 
   private constructor() {
     this.loadPremiumStatus();
@@ -67,6 +67,13 @@ class BannerAdManager {
   }
 
   /**
+   * Reload premium status from storage (useful after purchase)
+   */
+  public async reloadPremiumStatus(): Promise<void> {
+    await this.loadPremiumStatus();
+  }
+
+  /**
    * Get the ad unit ID for banner ads
    */
   public getAdUnitId(): string {
@@ -85,6 +92,13 @@ class BannerAdManager {
    */
   public setAdShownCallback(callback: () => void): void {
     this.onAdShownCallback = callback;
+  }
+
+  /**
+   * Set the callback to be triggered when ad is hidden
+   */
+  public setAdHiddenCallback(callback: () => void): void {
+    this.onAdHiddenCallback = callback;
   }
 
   /**
@@ -113,9 +127,14 @@ class BannerAdManager {
       this.swipeCount = 0; // Reset counter
 
       // Trigger the callback to indicate ad should be shown
+      // Don't clear the callback - keep it so it can be reused for future ads
       if (this.onAdShownCallback) {
-        this.onAdShownCallback();
-        this.onAdShownCallback = null; // Reset callback
+        try {
+          this.onAdShownCallback();
+        } catch (error) {
+          // Error calling callback - silently fail
+        }
+        // Don't set to null - keep the callback registered for future ads
       }
 
       return true; // Indicate that banner ad should be shown
@@ -129,6 +148,10 @@ class BannerAdManager {
    */
   public markAdAsHidden(): void {
     this.isAdCurrentlyShowing = false;
+    // Trigger the callback to indicate ad should be hidden
+    if (this.onAdHiddenCallback) {
+      this.onAdHiddenCallback();
+    }
   }
 
   /**

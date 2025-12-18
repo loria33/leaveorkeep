@@ -388,6 +388,8 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
     <string>This app requires microphone access in order to command swipes.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>KeepFlick uses speech recognition to allow you to control media navigation with voice commands like "keep" and "trash".</string>
 	<key>UISupportsMultipleScenes</key>
 	<false/>
 	<key>UIViewControllerBasedStatusBarAppearance</key>

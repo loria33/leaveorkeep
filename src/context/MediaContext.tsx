@@ -8,7 +8,12 @@ import React, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { checkMediaPermissionsWithRetry } from '../utils/permissions';
-import { getViewingConfig, getStartOfDay, isToday } from '../constants/app';
+import {
+  getViewingConfig,
+  getStartOfDay,
+  getStartOfHour,
+  isToday,
+} from '../constants/app';
 import { ScanProgress, MonthSummary } from '../utils/mediaScanner';
 import {
   markItemAsViewed,
@@ -46,7 +51,7 @@ export interface ViewingLimits {
   lastResetTime: number;
   isBlocked: boolean;
   remainingViews: number;
-  currentDay: number; // Start of current day timestamp
+  currentHour: number; // Start of current hour timestamp
 }
 
 export interface MonthContent {
@@ -192,7 +197,7 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     lastResetTime: Date.now(),
     isBlocked: false,
     remainingViews: getViewingConfig().maxViews,
-    currentDay: getStartOfDay(),
+    currentHour: getStartOfHour(),
   });
 
   // Month tracking state
@@ -208,31 +213,38 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     new Set(),
   );
 
-  // Check and reset viewing limits if it's a new day
+  // Check and reset viewing limits after 15-minute cooldown
   useEffect(() => {
-    const checkDailyReset = () => {
-      const today = getStartOfDay();
-      if (viewingLimits.currentDay !== today) {
-        const { maxViews } = getViewingConfig();
-        const resetLimits = {
-          viewCount: 0,
-          lastResetTime: Date.now(),
-          isBlocked: false,
-          remainingViews: maxViews,
-          currentDay: today,
-        };
-        setViewingLimits(resetLimits);
-        saveViewingLimitsToStorage(resetLimits);
+    const checkCooldownReset = () => {
+      // If blocked, check if 15 minutes have passed since lastResetTime
+      if (viewingLimits.isBlocked && viewingLimits.lastResetTime) {
+        const cooldownDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
+        const resetTime = viewingLimits.lastResetTime + cooldownDuration;
+        const now = Date.now();
+
+        if (now >= resetTime) {
+          // Cooldown expired, reset views
+          const { maxViews } = getViewingConfig();
+          const resetLimits = {
+            viewCount: 0,
+            lastResetTime: Date.now(),
+            isBlocked: false,
+            remainingViews: maxViews,
+            currentHour: getStartOfHour(),
+          };
+          setViewingLimits(resetLimits);
+          saveViewingLimitsToStorage(resetLimits);
+        }
       }
     };
 
     // Check immediately when component mounts
-    checkDailyReset();
+    checkCooldownReset();
 
-    // Check every minute to see if it's a new day
-    const interval = setInterval(checkDailyReset, 60000);
+    // Check every second to see if cooldown has expired
+    const interval = setInterval(checkCooldownReset, 1000);
     return () => clearInterval(interval);
-  }, [viewingLimits.currentDay]);
+  }, [viewingLimits.isBlocked, viewingLimits.lastResetTime]);
 
   // Simplified grouped media - only from loaded month content
   const groupedMedia = React.useMemo(() => {
@@ -273,7 +285,7 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
       setCompletedMonths(completed);
       // Cache is now loaded in the utility module
     } catch (error) {
-      console.log('Error loading viewed media data:', error);
+      // Error loading viewed media data
     }
   };
 
@@ -336,22 +348,32 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
 
       if (storedViewingLimits) {
         const limits = JSON.parse(storedViewingLimits);
-        const today = getStartOfDay();
+        const currentHour = getStartOfHour();
 
-        // Check if it's a new day since app was closed
-        if (!limits.currentDay || limits.currentDay !== today) {
-          const { maxViews } = getViewingConfig();
-          const resetLimits = {
-            viewCount: 0,
-            lastResetTime: Date.now(),
-            isBlocked: false,
-            remainingViews: maxViews,
-            currentDay: today,
-          };
-          setViewingLimits(resetLimits);
-          saveViewingLimitsToStorage(resetLimits);
+        // Check if blocked and if 15-minute cooldown has expired
+        if (limits.isBlocked && limits.lastResetTime) {
+          const cooldownDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
+          const resetTime = limits.lastResetTime + cooldownDuration;
+          const now = Date.now();
+
+          if (now >= resetTime) {
+            // Cooldown expired, reset views
+            const { maxViews } = getViewingConfig();
+            const resetLimits = {
+              viewCount: 0,
+              lastResetTime: Date.now(),
+              isBlocked: false,
+              remainingViews: maxViews,
+              currentHour: currentHour,
+            };
+            setViewingLimits(resetLimits);
+            saveViewingLimitsToStorage(resetLimits);
+          } else {
+            // Still in cooldown, load stored limits
+            setViewingLimits(limits);
+          }
         } else {
-          // Same day, load stored limits
+          // Not blocked, load stored limits
           setViewingLimits(limits);
         }
       }
@@ -400,11 +422,6 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
       // Fallback: Test Camera Roll access
       const { testCameraRollAccess } = await import('../utils/mediaScanner');
       const hasAccess = await testCameraRollAccess();
-      if (!hasAccess) {
-        console.log(
-          '❌ No Camera Roll access - user may need to grant permissions or has no photos',
-        );
-      }
 
       // Fallback to filesystem / CameraRoll scanning chain
       const { scanMonthSummariesFS } = await import('../utils/mediaScanner');
@@ -432,7 +449,7 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
       setMonthSummaries(sortedSummaries);
       setHasMore(false);
     } catch (error) {
-      console.log('❌ Error in scanMonthSummariesMethod:', error);
+      // Error in scanMonthSummariesMethod
     } finally {
       setIsLoading(false);
       setScanProgress(null);
@@ -658,21 +675,33 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   };
 
   const canViewMedia = () => {
+    // Premium users have unlimited views
+    if (isPremiumUser) {
+      return true;
+    }
     const { viewCount } = viewingLimits;
     return viewCount < getViewingConfig().maxViews;
   };
 
   const incrementViewCount = () => {
+    // Premium users don't have view limits, so don't increment count
+    if (isPremiumUser) {
+      return;
+    }
+
     const { maxViews } = getViewingConfig();
     const newViewCount = viewingLimits.viewCount + 1;
     const isBlocked = newViewCount >= maxViews;
 
+    // Set lastResetTime when limit is reached (for 15-minute cooldown)
+    const lastResetTime = isBlocked ? Date.now() : viewingLimits.lastResetTime;
+
     const newLimits = {
       viewCount: newViewCount,
-      lastResetTime: Date.now(),
+      lastResetTime,
       isBlocked,
       remainingViews: isBlocked ? 0 : maxViews - newViewCount,
-      currentDay: viewingLimits.currentDay,
+      currentHour: viewingLimits.currentHour,
     };
 
     setViewingLimits(newLimits);
@@ -680,10 +709,14 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   };
 
   const getRemainingCooldownTime = () => {
-    const today = getStartOfDay();
-    const tomorrow = today + 24 * 60 * 60 * 1000; // Next day at midnight
-    const remaining = tomorrow - Date.now();
-    return Math.max(0, remaining);
+    // If blocked, calculate 15 minutes from lastResetTime
+    if (viewingLimits.isBlocked && viewingLimits.lastResetTime) {
+      const cooldownDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
+      const resetTime = viewingLimits.lastResetTime + cooldownDuration;
+      const remaining = resetTime - Date.now();
+      return Math.max(0, remaining);
+    }
+    return 0;
   };
 
   const saveViewingLimitsToStorage = async (limits: ViewingLimits) => {
@@ -806,18 +839,16 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
 
     // Use summary totalCount if available, otherwise use actual items found
     // This ensures we have a persistent total count even if items aren't loaded
-    const totalCount = totalCountFromSummary > 0 
-      ? totalCountFromSummary 
-      : allMonthItems.length;
-    
+    const totalCount =
+      totalCountFromSummary > 0 ? totalCountFromSummary : allMonthItems.length;
+
     // Count viewed items from the items we have
     const viewedCount = await getViewedCount(allMonthItems);
-    
+
     // If we have a summary total but fewer items loaded, we can't know exact viewed count
     // But we can estimate based on what we have
-    const percentage = totalCount > 0 
-      ? Math.round((viewedCount / totalCount) * 100) 
-      : 0;
+    const percentage =
+      totalCount > 0 ? Math.round((viewedCount / totalCount) * 100) : 0;
     const isCompleted = await isMonthCompleted(monthKey);
 
     return {
@@ -835,16 +866,16 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
       // Load ALL items for the month to check completion properly
       // Use native module to get all items, not just loaded ones
       const { fetchMonthPhotosNative } = await import('../native/PhotoMonths');
-      
+
       // Fetch a large number of items (enough to cover most months)
       let allMonthItems: MediaItem[] = [];
       let offset = 0;
       const batchSize = 1000;
       let hasMore = true;
-      
+
       while (hasMore) {
         const batch = await fetchMonthPhotosNative(monthKey, offset, batchSize);
-        
+
         if (batch && batch.length > 0) {
           allMonthItems.push(...batch);
           offset += batch.length;
@@ -852,43 +883,37 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
         } else {
           hasMore = false;
         }
-        
+
         // Safety limit to prevent infinite loops
         if (offset > 10000) {
           break;
         }
       }
-      
+
       // If we couldn't get all items via native, fall back to loaded items
       if (allMonthItems.length === 0) {
         const loadedItems = getMonthItems(monthKey);
         if (loadedItems.length > 0) {
-          console.log(`⚠️ ${monthKey}: Native returned 0 items, using ${loadedItems.length} loaded items`);
           allMonthItems = loadedItems;
-        } else {
-          console.log(`⚠️ ${monthKey}: No items available from native or loaded items`);
         }
-      } else {
-        console.log(`📦 ${monthKey}: Fetched ${allMonthItems.length} items from native`);
       }
-      
+
       const isCompleted = await checkMonthCompletion(monthKey, allMonthItems);
-      
+
       if (isCompleted) {
         setCompletedMonths(prev => new Set(prev).add(monthKey));
       }
-      
+
       return isCompleted;
     } catch (error) {
-      console.log(`❌ Error checking ${monthKey}:`, error);
       // Fallback to loaded items if native module fails
       const monthItems = getMonthItems(monthKey);
       const isCompleted = await checkMonthCompletion(monthKey, monthItems);
-      
+
       if (isCompleted) {
         setCompletedMonths(prev => new Set(prev).add(monthKey));
       }
-      
+
       return isCompleted;
     }
   };
@@ -1011,7 +1036,7 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
           setDuplicateItems(allDuplicates);
         }
       } catch (error) {
-        console.log('❌ Error in scanDuplicates:', error);
+        // Error in scanDuplicates
       }
     },
 

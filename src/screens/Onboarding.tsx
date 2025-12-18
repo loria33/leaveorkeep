@@ -30,6 +30,7 @@ import RNFS from 'react-native-fs';
 import NetInfo from '@react-native-community/netinfo';
 import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions';
 import { APP_CONFIG } from '../constants/app'; // make sure path matches your project
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -396,23 +397,30 @@ const onboardingSteps = [
       'Before we can help organize your photos, please review our privacy policy and usage agreement.',
     icon: '📋',
   },
-  // NEW STEP (Whisper download)
   {
-    type: 'whisper_download',
-    title: 'Download Transcription Model',
-    subtitle: 'Enables on-device voice-to-text',
-    description: '',
-    icon: '🎤',
+    type: 'theme_selection',
+    title: 'Choose Your Theme 🎨',
+    subtitle: 'Pick your favorite color',
+    description: 'Select a theme that matches your style',
+    icon: '🎨',
   },
-  // NEW STEP (Microphone permission)
-  {
-    type: 'microphone_permission',
-    title: 'Microphone Permission',
-    subtitle: 'Required for voice transcription',
-    description:
-      'We only use the mic locally on your device for voice-to-text. Nothing is uploaded.',
-    icon: '🎙️',
-  },
+  // // NEW STEP (Whisper download)
+  // {
+  //   type: 'whisper_download',
+  //   title: 'Download Transcription Model',
+  //   subtitle: 'Enables on-device voice-to-text',
+  //   description: '',
+  //   icon: '🎤',
+  // },
+  // // NEW STEP (Microphone permission)
+  // {
+  //   type: 'microphone_permission',
+  //   title: 'Microphone Permission',
+  //   subtitle: 'Required for voice transcription',
+  //   description:
+  //     'We only use the mic locally on your device for voice-to-text. Nothing is uploaded.',
+  //   icon: '🎙️',
+  // },
   {
     type: 'interactive_swipe',
     title: 'Learn the Gestures',
@@ -503,6 +511,9 @@ const Onboarding: React.FC = () => {
   );
   const phraseIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Theme selection state
+  const [selectedTheme, setSelectedTheme] = useState<'pink' | 'blue'>('pink');
+
   useEffect(() => {
     if (isDownloading) {
       phraseIntervalRef.current = setInterval(() => {
@@ -533,6 +544,10 @@ const Onboarding: React.FC = () => {
     }
     if (stepDef?.type === 'microphone_permission') {
       handleMicrophonePermission();
+      return;
+    }
+    if (stepDef?.type === 'theme_selection') {
+      handleThemeSelection();
       return;
     }
 
@@ -753,6 +768,17 @@ const Onboarding: React.FC = () => {
     }
   };
 
+  // --- NEW: Theme selection implementation ---
+  const handleThemeSelection = async () => {
+    try {
+      await AsyncStorage.setItem('skin', selectedTheme);
+      setCurrentStep(currentStep + 1);
+    } catch (error) {
+      // Continue even if saving fails
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
   const step = onboardingSteps[currentStep];
 
   // --- Render Privacy step (unchanged) ---
@@ -946,6 +972,112 @@ const Onboarding: React.FC = () => {
               )}
               <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
                 <Text style={styles.nextButtonText}>Grant Access</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // --- NEW: Render Theme Selection step ---
+  if (step?.type === 'theme_selection') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            bounces={false}
+          >
+            <View style={styles.progressContainer}>
+              {onboardingSteps.map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.progressDot,
+                    index <= currentStep && styles.activeProgressDot,
+                  ]}
+                />
+              ))}
+            </View>
+
+            <View style={styles.contentContainer}>
+              <Text style={styles.icon}>🎨</Text>
+              <Text style={styles.title}>Choose Your Theme</Text>
+              <Text style={styles.subtitle}>Pick your favorite color</Text>
+              <Text style={styles.description}>
+                Select a theme that matches your style. You can change this
+                later in settings.
+              </Text>
+
+              <View style={styles.themeSelectorContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.themeOption,
+                    selectedTheme === 'pink' && styles.themeOptionActive,
+                  ]}
+                  onPress={() => setSelectedTheme('pink')}
+                >
+                  <LinearGradient
+                    colors={['#FFB3C1', '#FFD6E0']}
+                    style={styles.themeGradient}
+                  >
+                    <Text style={styles.themeEmoji}>🌸</Text>
+                    <Text
+                      style={[
+                        styles.themeOptionText,
+                        selectedTheme === 'pink' &&
+                          styles.themeOptionTextActive,
+                      ]}
+                    >
+                      Pink
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.themeOption,
+                    selectedTheme === 'blue' && styles.themeOptionActive,
+                  ]}
+                  onPress={() => setSelectedTheme('blue')}
+                >
+                  <LinearGradient
+                    colors={['#9FD3FF', '#CBE7FF']}
+                    style={styles.themeGradient}
+                  >
+                    <Text style={styles.themeEmoji}>💙</Text>
+                    <Text
+                      style={[
+                        styles.themeOptionText,
+                        selectedTheme === 'blue' &&
+                          styles.themeOptionTextActive,
+                      ]}
+                    >
+                      Blue
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.bottomContainer,
+                { paddingBottom: insets.bottom || 16 },
+              ]}
+            >
+              {currentStep > 0 && (
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => setCurrentStep(currentStep - 1)}
+                >
+                  <Text style={styles.backButtonText}>Back</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
+                <Text style={styles.nextButtonText}>Continue</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -1265,6 +1397,54 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: -height * 0.15,
     alignItems: 'center',
+  },
+
+  // Theme selection styles
+  themeSelectorContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginTop: 40,
+    paddingHorizontal: 20,
+  },
+  themeOption: {
+    width: width * 0.35,
+    height: width * 0.35,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  themeOptionActive: {
+    borderColor: '#ffffff',
+    borderWidth: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  themeGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  themeEmoji: {
+    fontSize: 50,
+    marginBottom: 10,
+  },
+  themeOptionText: {
+    fontSize: responsiveValues.subtitleSize,
+    fontWeight: '600',
+    color: '#ffffff',
+    textAlign: 'center',
+  },
+  themeOptionTextActive: {
+    fontWeight: '800',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
 });
 

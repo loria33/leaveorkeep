@@ -31,7 +31,7 @@ export const debugPermissionState = async (): Promise<void> => {
         }),
       );
     } catch (error) {
-      console.log('[Permission Debug] Error checking permissions:', error);
+      // Error checking permissions
     }
   }
 };
@@ -90,7 +90,6 @@ export const requestMicrophonePermission = async (): Promise<boolean> => {
       return status === RESULTS.GRANTED;
     }
   } catch (error) {
-    console.log('[Permissions] Error requesting microphone permission:', error);
     return false;
   }
 };
@@ -146,7 +145,6 @@ export const checkMediaPermissions = async (): Promise<boolean> => {
     );
     return hasReadPermission;
   } catch (error) {
-    console.log('[Permissions] Error in checkMediaPermissions:', error);
     return false;
   }
 };
@@ -161,7 +159,36 @@ export const checkMicrophonePermission = async (): Promise<boolean> => {
       return status === RESULTS.GRANTED;
     }
   } catch (error) {
-    console.log('[Permissions] Error checking microphone permission:', error);
+    return false;
+  }
+};
+
+export const checkSpeechRecognitionPermission = async (): Promise<boolean> => {
+  try {
+    if (Platform.OS === 'ios') {
+      const status = await check(PERMISSIONS.IOS.SPEECH_RECOGNITION);
+      return status === RESULTS.GRANTED;
+    } else {
+      // Android uses RECORD_AUDIO for speech recognition
+      const status = await check(PERMISSIONS.ANDROID.RECORD_AUDIO);
+      return status === RESULTS.GRANTED;
+    }
+  } catch (error) {
+    return false;
+  }
+};
+
+export const requestSpeechRecognitionPermission = async (): Promise<boolean> => {
+  try {
+    if (Platform.OS === 'ios') {
+      const status = await request(PERMISSIONS.IOS.SPEECH_RECOGNITION);
+      return status === RESULTS.GRANTED;
+    } else {
+      // Android uses RECORD_AUDIO for speech recognition
+      const status = await request(PERMISSIONS.ANDROID.RECORD_AUDIO);
+      return status === RESULTS.GRANTED;
+    }
+  } catch (error) {
     return false;
   }
 };

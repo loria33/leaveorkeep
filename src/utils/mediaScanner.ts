@@ -122,7 +122,6 @@ export const scanMonthSummariesFS = async (
           }
         }
       } catch (error) {
-        console.log(`❌ Error checking directory ${dir}:`, error);
         continue;
       }
     }
@@ -231,7 +230,6 @@ const getPhotosWithLimit = async (
       endCursor: photos.page_info.end_cursor,
     };
   } catch (error) {
-    console.log('📷 Error in getPhotosWithLimit:', error);
     return { edges: [], hasNextPage: false };
   }
 };
