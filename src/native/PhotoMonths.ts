@@ -12,6 +12,9 @@ declare global {
         offset: number,
         limit: number,
       ) => Promise<MediaItem[]>;
+      fetchMonthCount: (
+        monthKey: string,
+      ) => Promise<{ totalCount: number; photoCount: number; videoCount: number }>;
     };
   }
 }
@@ -80,6 +83,31 @@ export const fetchMonthPhotosNative = async (
 
     if (Array.isArray(result)) {
       return result as MediaItem[];
+    }
+
+    return null;
+  } catch (error) {
+    return null;
+  }
+};
+
+// LAZY LOADING: Count photos for a month without loading them
+export const fetchMonthCountNative = async (
+  monthKey: string,
+): Promise<{ totalCount: number; photoCount: number; videoCount: number } | null> => {
+  if (!PhotoMonths) {
+    return null;
+  }
+
+  if (typeof PhotoMonths.fetchMonthCount !== 'function') {
+    return null;
+  }
+
+  try {
+    const result = await PhotoMonths.fetchMonthCount(monthKey);
+
+    if (result && typeof result === 'object') {
+      return result as { totalCount: number; photoCount: number; videoCount: number };
     }
 
     return null;

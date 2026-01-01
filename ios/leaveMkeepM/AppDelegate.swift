@@ -15,12 +15,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    // Configure audio session for voice recognition
-    // This must be set to playAndRecord category to support defaultToSpeaker option
+    // Configure audio session category for voice recognition
+    // Video uses disableAudioSessionManagement, so it won't interfere
+    // Voice library will handle activation when needed
     do {
       let audioSession = AVAudioSession.sharedInstance()
-      try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
-      try audioSession.setActive(true)
+      try audioSession.setCategory(
+        .playAndRecord,
+        mode: .default,
+        options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers]
+      )
     } catch {
       print("Failed to configure audio session: \(error)")
     }

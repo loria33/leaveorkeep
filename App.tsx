@@ -20,22 +20,57 @@ import Onboarding from './src/screens/Onboarding';
 import Home from './src/screens/Home';
 import Trash from './src/screens/Trash';
 import About from './src/screens/About';
+import MediaViewerScreen, { MediaViewerScreenParams } from './src/screens/MediaViewerScreen';
+import MonthSelectionScreen, { MonthSelectionScreenParams } from './src/screens/MonthSelectionScreen';
 
 // Navigation Types
 type RootStackParamList = {
   Main: undefined;
   Onboarding: undefined;
-  Example: undefined;
 };
 
 type MainTabParamList = {
   About: undefined;
-  Home: undefined;
+  HomeStack: undefined;
   Trash: undefined;
+};
+
+type HomeStackParamList = {
+  Home: undefined;
+  MonthSelectionScreen: MonthSelectionScreenParams;
+  MediaViewerScreen: MediaViewerScreenParams;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const HomeStack = createStackNavigator<HomeStackParamList>();
+
+// Home Stack Navigator (nested inside Home tab)
+const HomeStackNavigator: React.FC = () => {
+  return (
+    <HomeStack.Navigator screenOptions={{ headerShown: false }}>
+      <HomeStack.Screen name="Home" component={Home} />
+      <HomeStack.Screen 
+        name="MonthSelectionScreen" 
+        component={MonthSelectionScreen}
+        options={{
+          headerShown: false,
+          presentation: 'card',
+          animation: 'slide_from_right',
+        }}
+      />
+      <HomeStack.Screen 
+        name="MediaViewerScreen" 
+        component={MediaViewerScreen}
+        options={{
+          headerShown: false,
+          presentation: 'fullScreenModal',
+          animation: 'slide_from_right',
+        }}
+      />
+    </HomeStack.Navigator>
+  );
+};
 
 // Tab Navigator
 const MainTabs: React.FC = () => {
@@ -44,7 +79,7 @@ const MainTabs: React.FC = () => {
 
   return (
     <Tab.Navigator
-      initialRouteName="Home"
+      initialRouteName="HomeStack"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: '#007bff',
@@ -70,8 +105,8 @@ const MainTabs: React.FC = () => {
         }}
       />
       <Tab.Screen
-        name="Home"
-        component={Home}
+        name="HomeStack"
+        component={HomeStackNavigator}
         options={{
           tabBarLabel: 'Home',
           tabBarIcon: ({ color, size }) => (
@@ -109,9 +144,7 @@ const AppNavigator: React.FC = () => {
       {!onboardingComplete ? (
         <Stack.Screen name="Onboarding" component={Onboarding} />
       ) : (
-        <>
-          <Stack.Screen name="Main" component={MainTabs} />
-        </>
+        <Stack.Screen name="Main" component={MainTabs} />
       )}
     </Stack.Navigator>
   );

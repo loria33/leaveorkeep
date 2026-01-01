@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const STORAGE_KEYS = {
   VIEWED_ITEMS: 'viewedMediaItems',
   COMPLETED_MONTHS: 'completedMonths',
+  LAST_VIEWED_ITEM_ID: 'lastViewedItemId', // Simple: single last viewed item ID
 } as const;
 
 // In-memory cache for fast lookups
@@ -319,5 +320,50 @@ export const debugMonthCompletion = async (
     missingItems,
     isCompleted,
   };
+};
+
+/**
+ * Store the last viewed item ID for a month (single map persistence)
+ * This allows users to resume from where they left off in each month
+ */
+export const setLastViewedItemId = async (
+  monthKey: string,
+  itemId: string,
+): Promise<void> => {
+  try {
+    const stored = await AsyncStorage.getItem(STORAGE_KEYS.LAST_VIEWED_ITEM_ID);
+    const lastItemMap: { [monthKey: string]: string } = stored
+      ? JSON.parse(stored)
+      : {};
+    
+    lastItemMap[monthKey] = itemId;
+    
+    await AsyncStorage.setItem(
+      STORAGE_KEYS.LAST_VIEWED_ITEM_ID,
+      JSON.stringify(lastItemMap),
+    );
+  } catch (error) {
+    // Error saving last viewed item ID
+  }
+};
+
+/**
+ * Get the last viewed item ID for a month
+ * Returns the item ID if found, or null if not found
+ */
+export const getLastViewedItemId = async (
+  monthKey: string,
+): Promise<string | null> => {
+  try {
+    const stored = await AsyncStorage.getItem(STORAGE_KEYS.LAST_VIEWED_ITEM_ID);
+    if (stored) {
+      const lastItemMap: { [monthKey: string]: string } = JSON.parse(stored);
+      return lastItemMap[monthKey] || null;
+    }
+  } catch (error) {
+    // Error loading last viewed item ID
+  }
+  
+  return null;
 };
 

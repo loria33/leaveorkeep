@@ -10,37 +10,98 @@ import {
   Platform,
   PlatformColor,
   ImageBackground,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
 import LinearGradient from 'react-native-linear-gradient';
 import {
   LiquidGlassView,
   isLiquidGlassSupported,
 } from '@callstack/liquid-glass';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MonthSelectionData } from '../utils/mediaScanner';
+import { useMedia, MediaItem } from '../context/MediaContext';
+import { MediaViewerScreenParams } from './MediaViewerScreen';
+import { getLastViewedItemId, loadViewedItems } from '../utils/viewedMediaTracker';
 
 const backgroundImagePink = require('../assets/bg.png');
 const backgroundImageBlue = require('../assets/bg2.jpg');
 
-interface MonthSelectionProps {
-  monthData: MonthSelectionData;
-  onSelectPhotos: () => void;
-  onSelectVideos: () => void;
-  onSelectAllMedia: () => void;
-  onClose: () => void;
-}
+// Define navigation params
+export type MonthSelectionScreenParams = {
+  monthKey: string;
+  monthName: string;
+};
+
+type HomeStackParamList = {
+  Home: undefined;
+  MonthSelectionScreen: MonthSelectionScreenParams;
+  MediaViewerScreen: MediaViewerScreenParams;
+};
+
+type MonthSelectionScreenRouteProp = RouteProp<HomeStackParamList, 'MonthSelectionScreen'>;
+type MonthSelectionScreenNavigationProp = StackNavigationProp<HomeStackParamList, 'MonthSelectionScreen'>;
 
 const { width, height } = Dimensions.get('window');
 
-const MonthSelection: React.FC<MonthSelectionProps> = ({
-  monthData,
-  onSelectPhotos,
-  onSelectVideos,
-  onSelectAllMedia,
-  onClose,
-}) => {
-  const [skin, setSkin] = useState<'pink' | 'blue'>('blue');
+const MonthSelectionScreen: React.FC = () => {
+  const navigation = useNavigation<MonthSelectionScreenNavigationProp>();
+  const route = useRoute<MonthSelectionScreenRouteProp>();
+  const { monthKey, monthName } = route.params;
   
+  const {
+    monthSummaries,
+    loadMonthContent,
+    canViewMedia,
+  } = useMedia();
+
+  const [skin, setSkin] = useState<'pink' | 'blue'>('blue');
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Helper function to get the starting index for a month
+  const getStartingIndex = async (
+    items: MediaItem[],
+    monthKey: string,
+  ): Promise<number> => {
+    if (items.length === 0) return 0;
+
+    try {
+      // First, try to get the last viewed item ID for this month
+      const lastViewedItemId = await getLastViewedItemId(monthKey);
+
+      if (lastViewedItemId) {
+        // Find that item in the current items array
+        const foundIndex = items.findIndex(
+          item => item.id === lastViewedItemId,
+        );
+        if (foundIndex >= 0) {
+          // Resume from where user left off in this month
+          return foundIndex;
+        }
+      }
+
+      // If last viewed item not found in current array, fall back to finding first unviewed item
+      const viewedItems = await loadViewedItems();
+      for (let i = 0; i < items.length; i++) {
+        if (!viewedItems.has(items[i].id)) {
+          return i;
+        }
+      }
+
+      // If all items are viewed, start at the beginning
+      return 0;
+    } catch (error) {
+      // On error, fall back to first index
+      return 0;
+    }
+  };
+
+  // Find month summary to get counts
+  const monthSummary = monthSummaries.find(m => m.monthKey === monthKey);
+  const photoCount = monthSummary?.photoCount || 0;
+  const videoCount = monthSummary?.videoCount || 0;
+  const totalCount = monthSummary?.totalCount || 0;
 
   // Load skin preference on mount
   useEffect(() => {
@@ -68,19 +129,149 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
   const backgroundImage =
     skin === 'blue' ? backgroundImageBlue : backgroundImagePink;
 
+  const handleSelectPhotos = async () => {
+    if (photoCount === 0) return;
+
+    setIsLoading(true);
+
+    // Check viewing limits before fetching
+    if (!canViewMedia()) {
+      navigation.navigate('MediaViewerScreen', {
+        monthKey,
+        mediaType: 'photos',
+        initialIndex: 0,
+        items: [],
+        totalCount: photoCount,
+      });
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const monthItems = await loadMonthContent(monthKey, 20);
+      const photoItems = monthItems.filter(item => item.type === 'photo');
+
+      if (photoItems.length > 0) {
+        // Get starting index (resume from last position or first unviewed)
+        const startIndex = await getStartingIndex(photoItems, monthKey);
+        
+        navigation.navigate('MediaViewerScreen', {
+          monthKey,
+          mediaType: 'photos',
+          initialIndex: startIndex,
+          items: photoItems,
+          totalCount: photoCount || photoItems.length,
+        });
+      } else {
+        Alert.alert('No Photos', `No photos found for ${monthName}`);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load photos for this month');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSelectVideos = async () => {
+    if (videoCount === 0) return;
+
+    setIsLoading(true);
+
+    // Check viewing limits before fetching
+    if (!canViewMedia()) {
+      navigation.navigate('MediaViewerScreen', {
+        monthKey,
+        mediaType: 'videos',
+        initialIndex: 0,
+        items: [],
+        totalCount: videoCount,
+      });
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const monthItems = await loadMonthContent(monthKey, 20);
+      const videoItems = monthItems.filter(item => item.type === 'video');
+
+      if (videoItems.length > 0) {
+        // Get starting index (resume from last position or first unviewed)
+        const startIndex = await getStartingIndex(videoItems, monthKey);
+        
+        navigation.navigate('MediaViewerScreen', {
+          monthKey,
+          mediaType: 'videos',
+          initialIndex: startIndex,
+          items: videoItems,
+          totalCount: videoCount || videoItems.length,
+        });
+      } else {
+        Alert.alert('No Videos', `No videos found for ${monthName}`);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load videos for this month');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSelectAllMedia = async () => {
+    setIsLoading(true);
+
+    // Check viewing limits before fetching
+    if (!canViewMedia()) {
+      navigation.navigate('MediaViewerScreen', {
+        monthKey,
+        mediaType: 'all',
+        initialIndex: 0,
+        items: [],
+        totalCount: totalCount,
+      });
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const monthItems = await loadMonthContent(monthKey, 20);
+
+      if (monthItems.length > 0) {
+        // Get starting index (resume from last position or first unviewed)
+        const startIndex = await getStartingIndex(monthItems, monthKey);
+        
+        navigation.navigate('MediaViewerScreen', {
+          monthKey,
+          mediaType: 'all',
+          initialIndex: startIndex,
+          items: monthItems,
+          totalCount: totalCount || monthItems.length,
+        });
+      } else {
+        Alert.alert('No Media', `No media found for ${monthName}`);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load media for this month');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleClose = () => {
+    navigation.goBack();
+  };
+
   return (
     <ImageBackground
       source={backgroundImage}
       style={styles.backgroundImage}
       resizeMode="cover"
     >
-      {skin === 'blue' && <View style={styles.blueTintOverlay} />}
+      {skin === 'blue' && <View style={styles.blueTintOverlay} pointerEvents="none" />}
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" />
 
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+          <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
             <Text
               style={[
                 styles.closeText,
@@ -96,7 +287,7 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
               skin === 'blue' && { color: '#ffffff' },
             ]}
           >
-            {monthData.monthName}
+            {monthName}
           </Text>
           <View style={styles.placeholder} />
         </View>
@@ -119,16 +310,26 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
               skin === 'blue' && { color: 'rgba(255, 255, 255, 0.9)' },
             ]}
           >
-            {monthData.totalCount} total items in {monthData.monthName}
+            {totalCount} total items in {monthName}
           </Text>
+
+          {isLoading && (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator
+                size="large"
+                color={skin === 'blue' ? '#ffffff' : '#1a1a1a'}
+              />
+            </View>
+          )}
 
           {/* Vertical action cards */}
           <View style={styles.actionsContainer}>
             {/* All Media (primary) */}
             <TouchableOpacity
-              onPress={onSelectAllMedia}
+              onPress={handleSelectAllMedia}
+              disabled={isLoading}
               activeOpacity={0.9}
-              style={{ marginBottom: 12 }}
+              style={{ marginBottom: 12, opacity: isLoading ? 0.5 : 1 }}
             >
               {isLiquidGlassSupported ? (
                 <LiquidGlassView
@@ -167,7 +368,7 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
                       >
                         All Media
                       </Text>
-                      {monthData.totalCount > 0 && (
+                      {totalCount > 0 && (
                         <Text
                           style={[
                             styles.actionCount,
@@ -176,8 +377,8 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
                             },
                           ]}
                         >
-                          {monthData.totalCount}{' '}
-                          {monthData.totalCount === 1 ? 'item' : 'items'}
+                          {totalCount}{' '}
+                          {totalCount === 1 ? 'item' : 'items'}
                         </Text>
                       )}
                     </View>
@@ -229,7 +430,7 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
                       >
                         All Media
                       </Text>
-                      {monthData.totalCount > 0 && (
+                      {totalCount > 0 && (
                         <Text
                           style={[
                             styles.actionCount,
@@ -238,8 +439,8 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
                             },
                           ]}
                         >
-                          {monthData.totalCount}{' '}
-                          {monthData.totalCount === 1 ? 'item' : 'items'}
+                          {totalCount}{' '}
+                          {totalCount === 1 ? 'item' : 'items'}
                         </Text>
                       )}
                     </View>
@@ -258,12 +459,12 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
 
             {/* Photos */}
             <TouchableOpacity
-              onPress={onSelectPhotos}
-              disabled={monthData.photoCount === 0}
+              onPress={handleSelectPhotos}
+              disabled={photoCount === 0 || isLoading}
               activeOpacity={0.9}
               style={{
                 marginBottom: 12,
-                opacity: monthData.photoCount === 0 ? 0.5 : 1,
+                opacity: photoCount === 0 || isLoading ? 0.5 : 1,
               }}
             >
               {isLiquidGlassSupported ? (
@@ -311,8 +512,8 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
                           },
                         ]}
                       >
-                        {monthData.photoCount}{' '}
-                        {monthData.photoCount === 1 ? 'photo' : 'photos'}
+                        {photoCount}{' '}
+                        {photoCount === 1 ? 'photo' : 'photos'}
                       </Text>
                     </View>
                     <Text
@@ -371,8 +572,8 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
                           },
                         ]}
                       >
-                        {monthData.photoCount}{' '}
-                        {monthData.photoCount === 1 ? 'photo' : 'photos'}
+                        {photoCount}{' '}
+                        {photoCount === 1 ? 'photo' : 'photos'}
                       </Text>
                     </View>
                     <Text
@@ -390,10 +591,10 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
 
             {/* Videos */}
             <TouchableOpacity
-              onPress={onSelectVideos}
-              disabled={monthData.videoCount === 0}
+              onPress={handleSelectVideos}
+              disabled={videoCount === 0 || isLoading}
               activeOpacity={0.9}
-              style={{ opacity: monthData.videoCount === 0 ? 0.5 : 1 }}
+              style={{ opacity: videoCount === 0 || isLoading ? 0.5 : 1 }}
             >
               {isLiquidGlassSupported ? (
                 <LiquidGlassView
@@ -440,8 +641,8 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
                           },
                         ]}
                       >
-                        {monthData.videoCount}{' '}
-                        {monthData.videoCount === 1 ? 'video' : 'videos'}
+                        {videoCount}{' '}
+                        {videoCount === 1 ? 'video' : 'videos'}
                       </Text>
                     </View>
                     <Text
@@ -500,8 +701,8 @@ const MonthSelection: React.FC<MonthSelectionProps> = ({
                           },
                         ]}
                       >
-                        {monthData.videoCount}{' '}
-                        {monthData.videoCount === 1 ? 'video' : 'videos'}
+                        {videoCount}{' '}
+                        {videoCount === 1 ? 'video' : 'videos'}
                       </Text>
                     </View>
                     <Text
@@ -528,22 +729,10 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     height: '100%',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
   },
   container: {
     flex: 1,
     backgroundColor: 'transparent',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 2000,
-    elevation: 24,
   },
   header: {
     flexDirection: 'row',
@@ -593,6 +782,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 40,
   },
+  loadingContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
   actionsContainer: {
     paddingHorizontal: 16,
   },
@@ -635,46 +828,6 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     marginLeft: 8,
   },
-  mediaButton: {
-    marginBottom: 20,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  buttonGradient: {
-    padding: 20,
-  },
-  buttonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  buttonIcon: {
-    fontSize: 32,
-    marginRight: 16,
-  },
-  buttonTextContainer: {
-    flex: 1,
-  },
-  buttonTitle: {
-    color: '#000',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  buttonCount: {
-    color: 'rgba(0, 0, 0, 0.8)',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  buttonArrow: {
-    color: '#000',
-    fontSize: 24,
-    fontWeight: '300',
-  },
   blueTintOverlay: {
     position: 'absolute',
     top: 0,
@@ -686,4 +839,5 @@ const styles = StyleSheet.create({
   },
 });
 
-export default MonthSelection;
+export default MonthSelectionScreen;
+

@@ -250,7 +250,8 @@ export const testCameraRollAccess = async (): Promise<boolean> => {
 export const scanMonthSummaries = async (
   options: MonthScanOptions = {},
 ): Promise<MonthSummary[]> => {
-  const { maxMonths = 999, onProgress } = options; // Increased default from 12 to 999
+  // MEMORY FIX: Reduced default from 999 to 50 to prevent memory spike
+  const { maxMonths = 50, onProgress } = options;
 
   try {
     onProgress?.({ current: 10, total: 100, phase: 'fetching' });
@@ -259,15 +260,18 @@ export const scanMonthSummaries = async (
     let cursor: string | undefined;
     let hasMore = true;
     let batchCount = 0;
-    const maxBatches = 20; // Increased from 5 to handle more photos
+    // MEMORY FIX: Reduced from 20 to 5 batches to prevent memory spike
+    const maxBatches = 5;
 
-    const dynamicBatchSizes = [100, 300, 1000, 2000]; // Start small, grow if needed
+    // MEMORY FIX: Reduced batch sizes dramatically - was loading 2000 photos at once!
+    const dynamicBatchSizes = [10, 20, 30]; // Much smaller batches
     let batchIndex = 0;
 
     while (hasMore && monthsFound.size < maxMonths && batchCount < maxBatches) {
       const batchLimit =
         dynamicBatchSizes[Math.min(batchIndex, dynamicBatchSizes.length - 1)];
 
+      // MEMORY FIX: This loads photo data into memory - keep batches tiny!
       const photoData = await getPhotosWithLimit(batchLimit, cursor);
 
       if (photoData.edges.length === 0) {

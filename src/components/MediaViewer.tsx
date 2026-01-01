@@ -11,7 +11,10 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  FlatList,
+  ViewToken,
 } from 'react-native';
+import FastImage from 'react-native-fast-image';
 import Video from 'react-native-video';
 import Share from 'react-native-share';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
@@ -51,12 +54,19 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   totalCount,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
+
   const [showControls, setShowControls] = useState(true);
   const [isNavigating, setIsNavigating] = useState(false);
-  const [videoError, setVideoError] = useState(false);
-  const [videoPaused, setVideoPaused] = useState(false);
+  const [videoError, setVideoError] = useState<{ [key: string]: boolean }>({});
+  const [videoPaused, setVideoPaused] = useState<{ [key: string]: boolean }>(
+    {},
+  );
   const [isLoading, setIsLoading] = useState(false);
-  const [items, setItems] = useState<MediaItem[]>(initialItems);
+  const [isCheckingLoadMore, setIsCheckingLoadMore] = useState(false);
+  const [items, setItems] = useState<MediaItem[]>(() => {
+    // Initialize with initialItems if available, otherwise empty array
+    return initialItems.length > 0 ? initialItems : [];
+  });
   const [showOnlyOneMessage, setShowOnlyOneMessage] = useState(false);
   const viewedItemsRef = useRef<Set<string>>(new Set());
   const [viewedItemsSet, setViewedItemsSet] = useState<Set<string>>(new Set());
@@ -68,11 +78,17 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   const [hasSeenVoiceTutorial, setHasSeenVoiceTutorial] = useState(false);
   const [isLoadingPurchase, setIsLoadingPurchase] = useState(false);
   const voiceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const spokenRef = useRef<string>(''); // Track what has already been processed
-  const isProcessingCommandsRef = useRef<boolean>(false); // Flag to prevent reset during command processing
   const isStoppingRef = useRef<boolean>(false); // Flag to prevent processing commands when stopping
   const isInitialMountRef = useRef<boolean>(true); // Track if this is the initial mount
   const previousIndexRef = useRef<number>(initialIndex); // Track previous index to detect actual navigation
+
+  // ===== VOICE: ONE COMMAND PER ITEM (HARD GATE) =====
+  const commandConsumedForItemRef = useRef<string | null>(null); // item.id that already consumed a command
+  const pendingNavRef = useRef<boolean>(false); // blocks until FlatList actually changes item (currentIndex changes)
+  const partialCommitTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastPartialRef = useRef<string>('');
+  const lastProcessedTranscriptRef = useRef<string>(''); // global, not per-item
+  const PARTIAL_STABLE_MS = 250;
 
   // Load viewed items set on mount for checkmark display
   useEffect(() => {
@@ -100,13 +116,10 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     checkVoiceTutorial();
   }, []);
 
-  // Update items when initialItems prop changes (when parent loads more)
-  useEffect(() => {
-    // Only update if initialItems has more items
-    if (initialItems.length > items.length) {
-      setItems(initialItems);
-    }
-  }, [initialItems.length]);
+  // SINGLE SOURCE OF TRUTH:
+  // - If monthKey is provided, use monthContent from context (it's the authoritative source)
+  // - If no monthKey, use initialItems prop (for non-month views like duplicates)
+  // This prevents two effects from fighting over the same state
 
   const {
     addToTrash,
@@ -122,10 +135,10 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     getMonthViewedStats,
   } = useMedia();
 
-  const translateX = useRef(new Animated.Value(0)).current;
+  // FlatList ref for programmatic navigation
+  const flatListRef = useRef<FlatList>(null);
   const translateY = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(1)).current;
-  const scale = useRef(new Animated.Value(1)).current;
 
   // Keep a ref to the latest items array to avoid closure issues
   const itemsRef = useRef<MediaItem[]>(items);
@@ -134,6 +147,58 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   }, [items]);
 
   const currentItem = items[currentIndex];
+
+  useEffect(() => {
+    if (!currentItem) return;
+    if (currentItem.type !== 'video') return;
+
+    // Every time a video comes into view, pause it by default
+    setVideoPaused(prev => ({
+      ...prev,
+      [currentItem.id]: true,
+    }));
+  }, [currentIndex, currentItem?.id, currentItem?.type]);
+
+  // Preload adjacent images for smoother transitions
+  useEffect(() => {
+    if (currentItem) {
+      // Preload next image
+      if (currentIndex < items.length - 1) {
+        const nextItem = items[currentIndex + 1];
+        if (
+          nextItem &&
+          nextItem.type === 'photo' &&
+          !nextItem.uri.startsWith('ph://')
+        ) {
+          FastImage.preload([
+            { uri: nextItem.uri, priority: FastImage.priority.low },
+          ]);
+        }
+      }
+      // Preload previous image
+      if (currentIndex > 0) {
+        const prevItem = items[currentIndex - 1];
+        if (
+          prevItem &&
+          prevItem.type === 'photo' &&
+          !prevItem.uri.startsWith('ph://')
+        ) {
+          FastImage.preload([
+            { uri: prevItem.uri, priority: FastImage.priority.low },
+          ]);
+        }
+      }
+    }
+  }, [currentIndex, items, currentItem]);
+
+  // Debug logging for current item
+  React.useEffect(() => {
+    // Use ref to avoid dependency on items.length
+    const currentItemsLength = itemsRef.current.length;
+    const itemsStateLength = items.length;
+
+    // Update current item when index or items change
+  }, [currentItem, currentIndex, items]); // Include items to track when it changes
 
   // Check if current item is viewed and update state (only if it was already viewed before)
   useEffect(() => {
@@ -152,19 +217,23 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     }
   }, [currentItem, viewedItemsSet]);
 
-  // Determine media type filter based on current items
-  const getMediaTypeFilter = (): 'photo' | 'video' | 'all' => {
-    if (items.length === 0) return 'all';
-    const hasPhotos = items.some(item => item.type === 'photo');
-    const hasVideos = items.some(item => item.type === 'video');
+  // Determine media type filter based on provided items (not current state)
+  // This prevents issues when items state is in transition
+  const getMediaTypeFilter = (
+    itemsToCheck: MediaItem[],
+  ): 'photo' | 'video' | 'all' => {
+    if (itemsToCheck.length === 0) return 'all';
+    const hasPhotos = itemsToCheck.some(item => item.type === 'photo');
+    const hasVideos = itemsToCheck.some(item => item.type === 'video');
     if (hasPhotos && !hasVideos) return 'photo';
     if (hasVideos && !hasPhotos) return 'video';
     return 'all';
   };
 
-  // Filter items based on current media type
+  // Filter items based on media type of the source items (not current state)
   const filterItems = (allItems: MediaItem[]): MediaItem[] => {
-    const filterType = getMediaTypeFilter();
+    // Use the source items to determine filter, not current state
+    const filterType = getMediaTypeFilter(allItems);
     if (filterType === 'photo') {
       return allItems.filter(item => item.type === 'photo');
     } else if (filterType === 'video') {
@@ -173,54 +242,262 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     return allItems;
   };
 
-  // Load first 40 items when component mounts if needed
+  // MEMORY OPTIMIZATION: Load items in batches
+  const MAX_ITEMS_IN_VIEWER = 200; // Increased to allow more items
+  const LOAD_MORE_THRESHOLD = 10; // Load more when within 10 items of the end
+  const BATCH_SIZE = 20; // Load 20 items at a time
+
+  // Load first batch when component mounts if needed
+  const hasLoadedInitialRef = useRef(false);
+
   useEffect(() => {
-    if (monthKey && items.length < 40) {
-      const content = monthContent[monthKey];
-      if (content && content.hasMore && !content.isLoading) {
-        setIsLoading(true);
-        loadMoreMonthContent(monthKey, 40).finally(() => {
-          setIsLoading(false);
-        });
+    if (monthKey && !hasLoadedInitialRef.current) {
+      const currentItemsLength = itemsRef.current.length;
+      if (currentItemsLength === 0) {
+        const content = monthContent[monthKey];
+        if (content && content.hasMore && !content.isLoading) {
+          hasLoadedInitialRef.current = true;
+          setIsLoading(true);
+          loadMoreMonthContent(monthKey, BATCH_SIZE).finally(() => {
+            setIsLoading(false);
+          });
+        }
       }
     }
   }, [monthKey]);
 
-  // Load next 40 items when viewing item 10
-  useEffect(() => {
-    if (monthKey && currentIndex === 10 && items.length < 80) {
-      const content = monthContent[monthKey];
-      if (content && content.hasMore && !content.isLoading) {
-        setIsLoading(true);
-        loadMoreMonthContent(monthKey, 40)
-          .then(() => {
-            const updatedContent = monthContent[monthKey];
-            if (updatedContent && updatedContent.items.length > items.length) {
-              const filtered = filterItems(updatedContent.items);
-              setItems(filtered);
-            }
-          })
-          .finally(() => {
-            setIsLoading(false);
-          });
-      }
-    }
-  }, [currentIndex, monthKey]);
+  // Load more items when user approaches the end of loaded items
+  const isLoadingMoreRef = useRef(false);
 
-  // Update items when monthContent changes - filter based on current items type
-  // This handles the case where loadMoreMonthContent updates monthContent
   useEffect(() => {
-    if (monthKey) {
-      const content = monthContent[monthKey];
-      if (content && content.items.length > 0) {
-        const filtered = filterItems(content.items);
-        // Update if we have more items than current local state
-        if (filtered.length >= items.length) {
-          setItems(filtered);
-        }
-      }
+    if (!monthKey || isLoadingMoreRef.current) {
+      return;
     }
-  }, [monthContent, monthKey, items.length]);
+    if (!canViewMedia()) return;
+
+    const currentItemsLength = itemsRef.current.length;
+    if (currentItemsLength === 0) return; // <-- critical
+    const content = monthContent[monthKey];
+
+    // Only show checking indicator when we're near the threshold
+    const isNearThreshold =
+      currentIndex >= currentItemsLength - LOAD_MORE_THRESHOLD;
+
+    // Load more if user is within threshold of the end and there are more items
+    if (
+      isNearThreshold &&
+      currentItemsLength < MAX_ITEMS_IN_VIEWER &&
+      content &&
+      content.hasMore &&
+      !content.isLoading
+    ) {
+      // Show loading indicator when actually loading
+      isLoadingMoreRef.current = true;
+      setIsLoading(true);
+      setIsCheckingLoadMore(true);
+      loadMoreMonthContent(monthKey, BATCH_SIZE)
+        .catch(error => {
+          console.error('[MediaViewer] ❌ Error loading more items:', error);
+        })
+        .finally(() => {
+          setIsLoading(false);
+          setIsCheckingLoadMore(false);
+          isLoadingMoreRef.current = false;
+        });
+    } else if (
+      isNearThreshold &&
+      content &&
+      content.hasMore &&
+      !content.isLoading
+    ) {
+      // Show brief indicator when near threshold but conditions not fully met (e.g., at max items)
+      setIsCheckingLoadMore(true);
+      setTimeout(() => {
+        setIsCheckingLoadMore(false);
+      }, 300);
+    } else {
+      // Don't show indicator when not near threshold
+      setIsCheckingLoadMore(false);
+    }
+  }, [currentIndex, monthKey, monthContent]);
+
+  // SINGLE SOURCE OF TRUTH: Update items from the appropriate source
+  // - If monthKey exists: use monthContent (authoritative source from context)
+  // - If no monthKey: use initialItems prop (for non-month views)
+  const lastProcessedMonthRef = useRef<string>('');
+  const lastProcessedContentLengthRef = useRef<number>(0);
+  const lastProcessedContentSignatureRef = useRef<string>(''); // Track content by length + first item ID
+
+  // Create stable signatures for dependency tracking (prevents infinite loops from object reference changes)
+  const monthContentSignature = React.useMemo(() => {
+    if (!monthKey) return null;
+    const content = monthContent[monthKey];
+    if (!content?.items?.length) return 'empty';
+    const firstItem = content.items[0];
+    const signature = `${content.items.length}-${firstItem?.id || ''}`;
+    return signature;
+  }, [monthKey, monthContent]);
+
+  // CRITICAL: When monthKey exists, initialItems is ONLY for initial mount
+  // Ignore changes to initialItems prop after mount - monthContent is the source of truth
+  const initialItemsSignature = React.useMemo(() => {
+    if (initialItems.length === 0) return 'empty';
+    return `${initialItems.length}-${initialItems[0]?.id || ''}`;
+  }, [initialItems.length, initialItems[0]?.id]);
+
+  // Track if we've initialized from initialItems (only once on mount)
+  const hasInitializedFromPropsRef = useRef(false);
+
+  // Track if we're currently processing to prevent concurrent updates
+  const isProcessingRef = useRef(false);
+
+  // Track effect execution count to detect infinite loops
+  const monthContentEffectCountRef = useRef(0);
+  const initialItemsEffectCountRef = useRef(0);
+
+  // SEPARATE EFFECTS: Split monthContent and initialItems into separate effects
+  // This prevents initialItems changes from triggering when monthKey exists
+
+  // Effect 1: Handle monthContent updates (ONLY when monthKey exists)
+  useEffect(() => {
+    monthContentEffectCountRef.current += 1;
+
+    // Warn if effect is running too many times
+    if (monthContentEffectCountRef.current > 10) {
+      console.warn(
+        '[MediaViewer] WARNING: monthContent effect has run',
+        monthContentEffectCountRef.current,
+        'times - possible infinite loop!',
+      );
+    }
+
+    if (!monthKey) return; // Skip if no monthKey
+
+    // Prevent concurrent processing
+    if (isProcessingRef.current) {
+      return;
+    }
+
+    // Use ref to get current items length (avoids stale closure issues)
+    const currentItemsLength = itemsRef.current.length;
+    const content = monthContent[monthKey];
+
+    // Reset tracking when monthKey changes
+    if (lastProcessedMonthRef.current !== monthKey) {
+      lastProcessedMonthRef.current = monthKey;
+      lastProcessedContentLengthRef.current = 0;
+      lastProcessedContentSignatureRef.current = '';
+      hasInitializedFromPropsRef.current = false; // Reset for new month
+    }
+
+    // Use the stable memoized signature
+    const contentSignature = monthContentSignature || 'empty';
+
+    // Skip if we've already processed this exact content
+    if (
+      contentSignature === lastProcessedContentSignatureRef.current &&
+      contentSignature !== 'empty'
+    ) {
+      return;
+    }
+
+    // If content is loading or empty, preserve existing items
+    if (!content || !content.items || content.items.length === 0) {
+      // CRITICAL: Never clear items if we already have them loaded
+      if (currentItemsLength > 0) {
+        return; // Keep current items - don't clear them!
+      }
+      // Only use initialItems ONCE on initial mount if we truly have nothing
+      if (
+        currentItemsLength === 0 &&
+        !hasInitializedFromPropsRef.current &&
+        initialItems.length > 0 &&
+        lastProcessedContentLengthRef.current === 0
+      ) {
+        isProcessingRef.current = true;
+        const limitedItems = initialItems.slice(0, MAX_ITEMS_IN_VIEWER);
+        setItems(limitedItems);
+        itemsRef.current = limitedItems;
+        lastProcessedContentLengthRef.current = initialItems.length;
+        lastProcessedContentSignatureRef.current = `${initialItems.length}-${
+          initialItems[0]?.id || ''
+        }`;
+        hasInitializedFromPropsRef.current = true;
+        isProcessingRef.current = false;
+      }
+      return;
+    }
+
+    const filtered = filterItems(content.items);
+    const filteredSignature = `${filtered.length}-${filtered[0]?.id || ''}`;
+
+    // Update signature ref IMMEDIATELY to prevent concurrent processing
+    if (filteredSignature !== lastProcessedContentSignatureRef.current) {
+      lastProcessedContentSignatureRef.current = filteredSignature;
+    } else {
+      return; // Same signature, skip
+    }
+
+    // Only update if content actually increased
+    if (filtered.length > lastProcessedContentLengthRef.current) {
+      isProcessingRef.current = true;
+      lastProcessedContentLengthRef.current = filtered.length;
+
+      if (filtered.length > currentItemsLength || currentItemsLength === 0) {
+        const limitedItems = filtered.slice(0, MAX_ITEMS_IN_VIEWER);
+        setItems(limitedItems);
+        itemsRef.current = limitedItems;
+      }
+      isProcessingRef.current = false;
+    } else if (filtered.length > 0) {
+      // Content changed but length didn't increase
+      isProcessingRef.current = true;
+      if (currentItemsLength === 0 || filtered.length !== currentItemsLength) {
+        const limitedItems = filtered.slice(0, MAX_ITEMS_IN_VIEWER);
+        setItems(limitedItems);
+        itemsRef.current = limitedItems;
+      }
+      isProcessingRef.current = false;
+    }
+  }, [monthKey, monthContentSignature]); // ONLY depend on monthContent - ignore initialItems completely
+
+  // Effect 2: Handle initialItems updates (ONLY when NO monthKey)
+  useEffect(() => {
+    initialItemsEffectCountRef.current += 1;
+
+    // Warn if effect is running too many times
+    if (initialItemsEffectCountRef.current > 10) {
+      console.warn(
+        '[MediaViewer] WARNING: initialItems effect has run',
+        initialItemsEffectCountRef.current,
+        'times - possible infinite loop!',
+      );
+    }
+
+    if (monthKey) {
+      return; // Skip if monthKey exists - monthContent is the source of truth
+    }
+
+    // Prevent concurrent processing
+    if (isProcessingRef.current) {
+      return;
+    }
+
+    const signature = initialItemsSignature || 'empty';
+
+    if (
+      signature !== lastProcessedContentSignatureRef.current &&
+      initialItems.length > 0
+    ) {
+      isProcessingRef.current = true;
+      const limitedItems = initialItems.slice(0, 50);
+      setItems(limitedItems);
+      itemsRef.current = limitedItems;
+      lastProcessedContentSignatureRef.current = signature;
+      lastProcessedContentLengthRef.current = initialItems.length;
+      isProcessingRef.current = false;
+    }
+  }, [monthKey, initialItemsSignature]); // Only run when monthKey is null/undefined and initialItems changes
 
   // Track viewed items and increment view count when index changes
   useEffect(() => {
@@ -248,8 +525,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     if (canViewMedia()) {
       incrementViewCount();
     }
-    setVideoError(false);
-    setVideoPaused(false);
+    // Video error and pause state are now per-item, no need to reset here
 
     // Mark the previous item as viewed (the one we navigated away from)
     if (itemToMark && !viewedItemsRef.current.has(itemToMark.id)) {
@@ -288,11 +564,64 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     }
   }, [currentIndex, items]);
 
+  // Keep refs for cleanup function to access latest values without dependencies
+  const currentIndexRef = useRef(currentIndex);
+  const monthKeyRef = useRef(monthKey);
+  const itemsRefForCallback = useRef(items);
+
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+    monthKeyRef.current = monthKey;
+    itemsRefForCallback.current = items;
+  }, [currentIndex, monthKey, items]);
+
+  // ===== VOICE GATE RESET: ONLY when item actually changes =====
+  useEffect(() => {
+    // Allow exactly one new voice command per new item
+    pendingNavRef.current = false;
+    commandConsumedForItemRef.current = null;
+
+    // Clear any pending partial debounce so it doesn't fire after navigation
+    if (partialCommitTimerRef.current) {
+      clearTimeout(partialCommitTimerRef.current);
+      partialCommitTimerRef.current = null;
+    }
+    lastPartialRef.current = '';
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentItem?.id]);
+
   // Save viewed items and check completion when component unmounts (viewer closes)
+  // CRITICAL FIX: Only depend on monthKey, not items or currentIndex
+  // Use refs to access current values in cleanup to prevent infinite loops
   useEffect(() => {
     return () => {
+      // MEMORY FIX: Clear FastImage cache when closing viewer
+      try {
+        FastImage.clearMemoryCache();
+        FastImage.clearDiskCache();
+      } catch (error) {
+        // Error clearing cache
+      }
+
+      // Clear voice timers/listeners safety
+      if (partialCommitTimerRef.current) {
+        clearTimeout(partialCommitTimerRef.current);
+        partialCommitTimerRef.current = null;
+      }
+      lastPartialRef.current = '';
+      pendingNavRef.current = false;
+      commandConsumedForItemRef.current = null;
+
+      // MEMORY OPTIMIZATION: Clear items array to free memory
+      // Use ref to get current items value
+      const currentItems = itemsRef.current;
+      const currentIndexOnClose = currentIndexRef.current;
+      const currentMonthKey = monthKeyRef.current;
+
+      setItems([]);
+
       // Mark the current item as viewed when closing (if not already marked)
-      const currentItemOnClose = items[currentIndex];
+      const currentItemOnClose = currentItems[currentIndexOnClose];
       if (
         currentItemOnClose &&
         !viewedItemsRef.current.has(currentItemOnClose.id)
@@ -325,6 +654,9 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         );
       }
 
+      // Clear viewed items ref to free memory
+      viewedItemsRef.current.clear();
+
       // Reload viewed items set when closing to refresh for next time
       loadViewedItems()
         .then(set => {
@@ -334,22 +666,41 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
           // Error reloading
         });
 
+      // Save last viewed item ID for this month so user can resume where they left off
+      if (
+        currentItemOnClose &&
+        currentMonthKey &&
+        currentMonthKey !== 'DUPLICATES' &&
+        !currentMonthKey.startsWith('TIME_FILTER_') &&
+        !currentMonthKey.startsWith('SOURCE_FILTER_')
+      ) {
+        import('../utils/viewedMediaTracker').then(
+          ({ setLastViewedItemId }) => {
+            setLastViewedItemId(currentMonthKey, currentItemOnClose.id).catch(
+              () => {
+                // Error saving last viewed item ID
+              },
+            );
+          },
+        );
+      }
+
       // Check month completion when viewer closes
       if (
-        monthKey &&
-        monthKey !== 'DUPLICATES' &&
-        !monthKey.startsWith('TIME_FILTER_') &&
-        !monthKey.startsWith('SOURCE_FILTER_')
+        currentMonthKey &&
+        currentMonthKey !== 'DUPLICATES' &&
+        !currentMonthKey.startsWith('TIME_FILTER_') &&
+        !currentMonthKey.startsWith('SOURCE_FILTER_')
       ) {
         // Wait a bit for storage to be saved, then check completion
         setTimeout(() => {
-          checkAndMarkMonthCompleted(monthKey).catch(() => {
+          checkAndMarkMonthCompleted(currentMonthKey).catch(() => {
             // Error checking completion
           });
         }, 2000);
       }
     };
-  }, [monthKey, currentIndex, items]);
+  }, [monthKey]); // ONLY depend on monthKey - cleanup should only run on unmount or monthKey change
 
   // Timer effect for blocked view
   useEffect(() => {
@@ -460,7 +811,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     }
   };
 
-  // All hooks must be called before any conditional returns
+  // Navigate using FlatList scrollToIndex for smooth native scrolling
   const smoothNavigate = useCallback(
     (direction: 'next' | 'prev') => {
       if (isNavigating) return;
@@ -482,58 +833,41 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
           direction === 'next' ? prevIndex + 1 : prevIndex - 1;
 
         // Handle endless loop navigation - use ref for latest length
+        const currentItemsLength = itemsRef.current.length;
         let finalTargetIndex = targetIndex;
         if (targetIndex < 0) {
-          finalTargetIndex = itemsRef.current.length - 1;
-        } else if (targetIndex >= itemsRef.current.length) {
+          finalTargetIndex = currentItemsLength - 1;
+        } else if (targetIndex >= currentItemsLength) {
           finalTargetIndex = 0;
         }
 
-        return finalTargetIndex;
-      });
-
-      // Animate the transition
-      const slideDistance = direction === 'next' ? -width : width;
-
-      Animated.parallel([
-        Animated.timing(translateX, {
-          toValue: slideDistance,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: 0.7,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scale, {
-          toValue: 0.95,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        // Reset animations for new item
-        translateX.setValue(0);
-        opacity.setValue(1);
-        scale.setValue(1);
-        setIsNavigating(false);
+        // Use FlatList's native scrollToIndex for smooth scrolling
+        if (flatListRef.current) {
+          flatListRef.current.scrollToIndex({
+            index: finalTargetIndex,
+            animated: true,
+          });
+        }
 
         // Track swipe for banner ads (only count forward swipes, not backward)
         if (direction === 'next') {
-          BannerAdManager.getInstance().handleSwipe();
+          // Await handleSwipe to ensure it processes correctly
+          BannerAdManager.getInstance()
+            .handleSwipe()
+            .catch(() => {
+              // Silently handle any errors
+            });
         }
+
+        setIsNavigating(false);
+        return finalTargetIndex;
       });
     },
     [isNavigating],
   );
 
   const handleNext = useCallback(() => {
-    // Reset voice transcript and spoken when navigating (only if not processing commands)
-    if (!isProcessingCommandsRef.current) {
-      setVoiceTranscript('');
-      spokenRef.current = '';
-    }
-
+    // Voice command gating is handled centrally; do not reset here.
     smoothNavigate('next');
   }, [smoothNavigate]);
 
@@ -544,11 +878,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   const handleTrash = useCallback(() => {
     if (!currentItem) return;
 
-    // Reset voice transcript and spoken when trashing (only if not processing commands)
-    if (!isProcessingCommandsRef.current) {
-      setVoiceTranscript('');
-      spokenRef.current = '';
-    }
+    // Voice command gating is handled centrally; do not reset here.
 
     // Add to trash
     addToTrash(currentItem);
@@ -606,9 +936,6 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   const stopVoiceRecognitionRef = useRef<(() => Promise<void>) | undefined>(
     undefined,
   );
-  const processVoiceCommandRef = useRef<
-    ((transcript: string) => void) | undefined
-  >(undefined);
 
   // Update refs immediately when component renders
   handleNextRef.current = handleNext;
@@ -619,13 +946,19 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       // Set stopping flag to prevent any final results from being processed
       isStoppingRef.current = true;
 
-      // Clear processing flag to prevent any ongoing command processing
-      isProcessingCommandsRef.current = false;
+      // Stop any pending partial commit
+      if (partialCommitTimerRef.current) {
+        clearTimeout(partialCommitTimerRef.current);
+        partialCommitTimerRef.current = null;
+      }
+      lastPartialRef.current = '';
 
       await Voice.stop();
       setIsListening(false);
       setVoiceTranscript('');
-      spokenRef.current = ''; // Reset spoken when stopping
+      pendingNavRef.current = false;
+      commandConsumedForItemRef.current = null;
+
       if (voiceTimeoutRef.current) {
         clearTimeout(voiceTimeoutRef.current);
         voiceTimeoutRef.current = null;
@@ -637,203 +970,58 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       }, 1000);
     } catch (error) {
       setIsListening(false);
-      isProcessingCommandsRef.current = false; // Make sure flag is cleared even on error
       isStoppingRef.current = false; // Reset stopping flag on error
+      pendingNavRef.current = false;
+      commandConsumedForItemRef.current = null;
     }
   }, []);
 
   stopVoiceRecognitionRef.current = stopVoiceRecognition;
 
-  // Define processVoiceCommand and store in ref
-  useEffect(() => {
-    processVoiceCommandRef.current = (transcript: string) => {
-      // Prevent infinite loops - if already processing, skip
-      if (isProcessingCommandsRef.current) {
-        return;
-      }
+  const commitVoiceCommandOncePerItem = useCallback((transcript: string) => {
+    if (isStoppingRef.current) return;
 
-      const lowerTranscript = transcript.toLowerCase();
+    const normalized = transcript.toLowerCase().trim();
+    if (!normalized) return;
 
-      // Remove already spoken text from the new transcript to get only new words
-      let newWords = lowerTranscript;
-      if (spokenRef.current) {
-        const spokenLower = spokenRef.current.toLowerCase();
-        // Remove the spoken part from the beginning of the transcript
-        if (lowerTranscript.startsWith(spokenLower)) {
-          newWords = lowerTranscript.substring(spokenLower.length).trim();
-        } else {
-          // If spoken text is in the middle or end, try to find and remove it
-          const spokenIndex = lowerTranscript.indexOf(spokenLower);
-          if (spokenIndex !== -1) {
-            // Remove the spoken part
-            newWords = (
-              lowerTranscript.substring(0, spokenIndex) +
-              lowerTranscript.substring(spokenIndex + spokenLower.length)
-            ).trim();
-          }
-        }
-      }
+    // 1) Ignore duplicate callbacks with same transcript payload
+    if (normalized === lastProcessedTranscriptRef.current) return;
+    lastProcessedTranscriptRef.current = normalized;
 
-      if (!newWords) {
-        return; // No new words to process
-      }
+    const item = itemsRef.current[currentIndexRef.current];
+    if (!item) return;
 
-      // Find ALL command words in new words, don't prioritize - process in order
-      const processedUpTo = spokenRef.current
-        ? spokenRef.current.toLowerCase().length
-        : 0;
-      const commands: Array<{ word: string; index: number; endIndex: number }> =
-        [];
+    // per-item hard gate
+    if (commandConsumedForItemRef.current === item.id) return;
+    if (pendingNavRef.current) return;
 
-      // Find all "keep" positions
-      let keepIndex = newWords.indexOf('keep', 0);
-      while (keepIndex !== -1) {
-        commands.push({
-          word: 'keep',
-          index: keepIndex,
-          endIndex: keepIndex + 4,
-        });
-        keepIndex = newWords.indexOf('keep', keepIndex + 1);
-      }
+    // 2) Determine the MOST RECENT command word in the transcript
+    //    (not "does it contain flick anywhere")
+    const cmdRegex =
+      /\b(keep|swipe|next|continue|trash|flick|delete|remove)\b/g;
 
-      // Find all "swipe" positions
-      let swipeIndex = newWords.indexOf('swipe', 0);
-      while (swipeIndex !== -1) {
-        commands.push({
-          word: 'swipe',
-          index: swipeIndex,
-          endIndex: swipeIndex + 5,
-        });
-        swipeIndex = newWords.indexOf('swipe', swipeIndex + 1);
-      }
+    let match: RegExpExecArray | null;
+    let lastCmd: string | null = null;
 
-      // Find all "trash" positions
-      let trashIndex = newWords.indexOf('trash', 0);
-      while (trashIndex !== -1) {
-        commands.push({
-          word: 'trash',
-          index: trashIndex,
-          endIndex: trashIndex + 5,
-        });
-        trashIndex = newWords.indexOf('trash', trashIndex + 1);
-      }
+    while ((match = cmdRegex.exec(normalized)) !== null) {
+      lastCmd = match[1];
+    }
 
-      // Find all "flick" positions
-      let flickIndex = newWords.indexOf('flick', 0);
-      while (flickIndex !== -1) {
-        commands.push({
-          word: 'flick',
-          index: flickIndex,
-          endIndex: flickIndex + 5,
-        });
-        flickIndex = newWords.indexOf('flick', flickIndex + 1);
-      }
+    if (!lastCmd) return;
 
-      // Sort commands by their position in new words (process in order)
-      commands.sort((a, b) => a.index - b.index);
+    const isTrash = ['trash', 'flick', 'delete', 'remove'].includes(lastCmd);
+    const isNext = ['keep', 'swipe', 'next', 'continue'].includes(lastCmd);
 
-      if (commands.length === 0) {
-        return; // No commands found
-      }
+    if (!isTrash && !isNext) return;
 
-      // Process the first command immediately
-      const firstCmd = commands[0];
+    // consume immediately
+    commandConsumedForItemRef.current = item.id;
+    pendingNavRef.current = true;
+    setVoiceTranscript('');
 
-      // Calculate the position in the FULL transcript where this command ends
-      // processedUpTo is the length of what we've already spoken (in the full transcript)
-      // firstCmd.index is the position in newWords where this command starts
-      // firstCmd.endIndex is where it ends in newWords
-      // So in the full transcript, this command starts at: processedUpTo + firstCmd.index
-      // And ends at: processedUpTo + firstCmd.endIndex
-      const commandStartInFullTranscript = processedUpTo + firstCmd.index;
-      const fullTranscriptEndPosition = processedUpTo + firstCmd.endIndex;
-
-      // Calculate what spoken will be after processing this command
-      const newSpoken = lowerTranscript.substring(0, fullTranscriptEndPosition);
-
-      // Only process if this command hasn't been processed yet
-      const currentSpoken = spokenRef.current.toLowerCase();
-      const newSpokenLower = newSpoken.toLowerCase();
-
-      // Check if we've already processed up to this point
-      // We should only skip if currentSpoken is LONGER than newSpoken, not equal
-      // If they're equal, we haven't processed this command yet
-      if (
-        currentSpoken.length > newSpokenLower.length &&
-        currentSpoken.length > 0
-      ) {
-        // If there are more commands, try to process them with the remaining transcript
-        if (commands.length > 1) {
-          setTimeout(() => {
-            // Use the full transcript so we can correctly calculate positions
-            processVoiceCommandRef.current?.(lowerTranscript);
-          }, 100);
-        }
-        return;
-      }
-
-      // Also check if currentSpoken already contains newSpoken (exact match means already processed)
-      if (currentSpoken === newSpokenLower && currentSpoken.length > 0) {
-        // If there are more commands, try to process them
-        if (commands.length > 1) {
-          setTimeout(() => {
-            processVoiceCommandRef.current?.(lowerTranscript);
-          }, 100);
-        }
-        return;
-      }
-
-      // Also check if newSpoken starts with currentSpoken (meaning we're adding new content)
-      // If it doesn't, it might be a different transcript or a reset happened
-      if (
-        currentSpoken &&
-        currentSpoken.length > 0 &&
-        !newSpokenLower.startsWith(currentSpoken)
-      ) {
-        // This might be a new recognition session, reset spoken and process
-        spokenRef.current = '';
-      }
-
-      // Set flag FIRST to prevent reset during processing
-      isProcessingCommandsRef.current = true;
-
-      // Update spoken to include everything up to and including this command
-      // Do this BEFORE calling handleNext/handleTrash so the effect doesn't reset it
-      spokenRef.current = newSpoken;
-
-      // Process the command
-      if (firstCmd.word === 'keep' || firstCmd.word === 'swipe') {
-        setVoiceTranscript('');
-        // Flag is already set, so handleNext won't reset spokenRef
-        handleNextRef.current?.();
-      } else if (firstCmd.word === 'trash' || firstCmd.word === 'flick') {
-        setVoiceTranscript('');
-        // Flag is already set, so handleTrash won't reset spokenRef
-        if (handleTrashRef.current) {
-          handleTrashRef.current();
-        }
-      }
-
-      // If there are more commands, process them after a delay
-      if (commands.length > 1) {
-        setTimeout(() => {
-          // Recursively process remaining commands with the SAME transcript
-          // The spokenRef has been updated, so the next call will correctly
-          // identify only the remaining unprocessed commands
-          // Reset flag before recursive call to allow it to process
-          isProcessingCommandsRef.current = false;
-          // Use the same transcript - spokenRef will filter out what's already processed
-          processVoiceCommandRef.current?.(lowerTranscript);
-        }, 800); // Increased delay to ensure handleNext/handleTrash animation has completed
-      } else {
-        // No more commands, reset flag after a delay to allow animations to complete
-        // Use longer delay to ensure currentIndex change effect has run and navigation is complete
-        setTimeout(() => {
-          isProcessingCommandsRef.current = false;
-        }, 800);
-      }
-    };
-  }, []); // Only set up once
+    if (isTrash) handleTrashRef.current?.();
+    else handleNextRef.current?.();
+  }, []);
 
   // Voice recognition setup and cleanup
   useEffect(() => {
@@ -852,6 +1040,15 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         clearTimeout(voiceTimeoutRef.current);
         voiceTimeoutRef.current = null;
       }
+      if (partialCommitTimerRef.current) {
+        clearTimeout(partialCommitTimerRef.current);
+        partialCommitTimerRef.current = null;
+      }
+      lastPartialRef.current = '';
+      pendingNavRef.current = false;
+      // Do not clear commandConsumedForItemRef here; it should remain consumed for this item
+      // until item changes. But if speech errors mid-item, allow retry by clearing consume.
+      commandConsumedForItemRef.current = null;
     };
 
     Voice.onSpeechResults = (e: any) => {
@@ -859,10 +1056,17 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       if (isStoppingRef.current) {
         return;
       }
+      if (partialCommitTimerRef.current) {
+        clearTimeout(partialCommitTimerRef.current);
+        partialCommitTimerRef.current = null;
+      }
+
       if (e.value && e.value.length > 0) {
         const transcript = e.value[0].toLowerCase();
         setVoiceTranscript(transcript);
-        processVoiceCommandRef.current?.(transcript);
+
+        // Backup commit on final (won't double fire because of gate)
+        commitVoiceCommandOncePerItem(transcript);
       }
     };
 
@@ -874,7 +1078,16 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       if (e.value && e.value.length > 0) {
         const partialTranscript = e.value[0].toLowerCase();
         setVoiceTranscript(partialTranscript);
-        processVoiceCommandRef.current?.(partialTranscript);
+
+        lastPartialRef.current = partialTranscript;
+
+        // Debounce: commit only after stable partial (responsive, no waiting for speech end)
+        if (partialCommitTimerRef.current) {
+          clearTimeout(partialCommitTimerRef.current);
+        }
+        partialCommitTimerRef.current = setTimeout(() => {
+          commitVoiceCommandOncePerItem(lastPartialRef.current);
+        }, PARTIAL_STABLE_MS);
       }
     };
 
@@ -890,27 +1103,32 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       if (voiceTimeoutRef.current) {
         clearTimeout(voiceTimeoutRef.current);
       }
+      if (partialCommitTimerRef.current) {
+        clearTimeout(partialCommitTimerRef.current);
+        partialCommitTimerRef.current = null;
+      }
+      lastPartialRef.current = '';
+      pendingNavRef.current = false;
+      commandConsumedForItemRef.current = null;
     };
-  }, []); // Empty dependency array - listeners should only be set up once
-
-  // Reset transcript when navigating to a new item (but keep listening)
-  useEffect(() => {
-    if (isListening && !isProcessingCommandsRef.current) {
-      // Reset transcript and spoken when navigating to new item
-      // But don't reset if we're currently processing voice commands
-      setVoiceTranscript('');
-      spokenRef.current = '';
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex]);
+  }, []);
 
   const startVoiceRecognitionInternal = async () => {
     try {
       // Reset stopping flag when starting
       isStoppingRef.current = false;
 
-      // Check if Voice is available
-      const isAvailable = await Voice.isAvailable();
+      // Reset per-item gates for current item when starting fresh
+      pendingNavRef.current = false;
+      commandConsumedForItemRef.current = null;
+
+      // Clear any pending partial debounce
+      if (partialCommitTimerRef.current) {
+        clearTimeout(partialCommitTimerRef.current);
+        partialCommitTimerRef.current = null;
+      }
+      lastPartialRef.current = '';
 
       // Check microphone permission
       let hasMicPermission = await checkMicrophonePermission();
@@ -940,17 +1158,30 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
           );
           return;
         }
+
+        // If current item is a video, pause it (video won't interfere with audio session anymore)
+        const currentItemForVoice = items[currentIndex];
+        if (
+          currentItemForVoice?.type === 'video' &&
+          !videoPaused[currentItemForVoice.id]
+        ) {
+          setVideoPaused(prev => ({
+            ...prev,
+            [currentItemForVoice.id]: true,
+          }));
+        }
       }
 
-      // Start voice recognition
+      // Start voice recognition - voice library will handle audio session itself
+      // Since video has disableAudioSessionManagement, there's no conflict
       try {
         await Voice.start('en-US');
+        setIsListening(true);
       } catch (startError) {
+        setIsListening(false);
         throw startError;
       }
-      setIsListening(true);
       setVoiceTranscript('');
-      spokenRef.current = ''; // Reset spoken when starting new session
 
       // Set 50 second timeout
       voiceTimeoutRef.current = setTimeout(() => {
@@ -975,11 +1206,11 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     await startVoiceRecognitionInternal();
   };
 
-  const onGestureEvent = Animated.event(
+  // Only handle vertical gestures for trash (horizontal is handled by FlatList)
+  const onVerticalGestureEvent = Animated.event(
     [
       {
         nativeEvent: {
-          translationX: translateX,
           translationY: translateY,
         },
       },
@@ -987,25 +1218,10 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     { useNativeDriver: true },
   );
 
-  const onHandlerStateChange = (event: any) => {
+  // Handle vertical gesture state changes (for trash)
+  const onVerticalHandlerStateChange = (event: any) => {
     if (event.nativeEvent.state === State.END) {
-      if (isNavigating) {
-        // Reset position if we're in the middle of navigation
-        Animated.parallel([
-          Animated.spring(translateX, {
-            toValue: 0,
-            useNativeDriver: true,
-          }),
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-          }),
-        ]).start();
-        return;
-      }
-
-      const { translationX, translationY, velocityX, velocityY } =
-        event.nativeEvent;
+      const { translationY, velocityY } = event.nativeEvent;
 
       // Check for vertical swipe up (trash) - drag up goes to trash
       if (translationY < -100 || velocityY < -1000) {
@@ -1013,54 +1229,78 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         return;
       }
 
-      // If only one item, show message for horizontal swipes
-      if (items.length === 1) {
-        if (Math.abs(translationX) > 50 || Math.abs(velocityX) > 500) {
-          setShowOnlyOneMessage(true);
-          setTimeout(() => setShowOnlyOneMessage(false), 2000);
-        }
-        // Reset position
-        Animated.parallel([
-          Animated.spring(translateX, {
-            toValue: 0,
-            useNativeDriver: true,
-          }),
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-          }),
-        ]).start();
-        return;
-      }
-
-      // Check for horizontal swipes (navigation)
-      const horizontalThreshold = 80;
-      const velocityThreshold = 800;
-
-      if (translationX > horizontalThreshold || velocityX > velocityThreshold) {
-        // Swipe right - previous image
-        handlePrevious();
-      } else if (
-        translationX < -horizontalThreshold ||
-        velocityX < -velocityThreshold
-      ) {
-        // Swipe left - next image
-        handleNext();
-      } else {
-        // Reset position for small swipes
-        Animated.parallel([
-          Animated.spring(translateX, {
-            toValue: 0,
-            useNativeDriver: true,
-          }),
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-          }),
-        ]).start();
-      }
+      // Reset position if swipe wasn't strong enough
+      Animated.spring(translateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 100,
+        friction: 8,
+      }).start();
     }
   };
+
+  // Track viewable items to update currentIndex - use refs to avoid stale closures
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      if (viewableItems.length > 0 && viewableItems[0].index !== null) {
+        const newIndex = viewableItems[0].index;
+        const currentIdx = currentIndexRef.current;
+        const currentItems = itemsRefForCallback.current;
+
+        if (
+          newIndex !== currentIdx &&
+          newIndex >= 0 &&
+          newIndex < currentItems.length
+        ) {
+          // Track swipe for banner ads (only count forward swipes, not backward)
+          if (newIndex > currentIdx) {
+            BannerAdManager.getInstance()
+              .handleSwipe()
+              .catch(() => {
+                // Silently handle any errors
+              });
+          }
+          setCurrentIndex(newIndex);
+        }
+      }
+    },
+    [], // Empty deps - using refs for latest values
+  );
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50,
+  }).current;
+
+  // Track if we've scrolled to initial position - use state so we can use it in render
+  const [hasScrolledToInitial, setHasScrolledToInitial] = useState(false);
+  const initialIndexRef = useRef(initialIndex);
+
+  useEffect(() => {
+    // Reset when initialIndex prop changes (new viewer opened)
+    if (initialIndexRef.current !== initialIndex) {
+      setHasScrolledToInitial(false);
+      initialIndexRef.current = initialIndex;
+    }
+  }, [initialIndex]);
+
+  useEffect(() => {
+    // Only scroll once when items are first loaded
+    if (!hasScrolledToInitial && items.length > 0 && flatListRef.current) {
+      const targetIndex = initialIndexRef.current;
+      if (targetIndex >= 0 && targetIndex < items.length) {
+        setHasScrolledToInitial(true);
+        // Small delay to ensure FlatList is ready
+        setTimeout(() => {
+          if (flatListRef.current) {
+            flatListRef.current.scrollToIndex({
+              index: targetIndex,
+              animated: false,
+            });
+          }
+        }, 100);
+      }
+    }
+  }, [hasScrolledToInitial, items.length]);
 
   const toggleControls = () => {
     setShowControls(!showControls);
@@ -1145,96 +1385,226 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       <StatusBar hidden />
 
       {/* Loading Indicator */}
-      {isLoading && (
+      {(isLoading || isCheckingLoadMore) && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color="#fff" />
         </View>
       )}
 
-      {/* Media Container */}
+      {/* Media Container - Using FlatList for native smooth scrolling */}
       <View style={styles.mediaContainer}>
-        <TouchableOpacity
-          style={styles.mediaTouch}
-          onPress={toggleControls}
-          activeOpacity={1}
+        <PanGestureHandler
+          onGestureEvent={onVerticalGestureEvent}
+          onHandlerStateChange={onVerticalHandlerStateChange}
+          activeOffsetY={[-20, 20]} // only activate after vertical intent
+          failOffsetX={[-20, 20]} // fail quickly on horizontal intent
+          simultaneousHandlers={flatListRef} // <-- key: don't block FlatList
         >
-          <Animated.View
-            style={[
-              styles.mediaWrapper,
-              {
-                transform: [
-                  { translateX: translateX },
-                  { translateY: translateY },
-                  { scale: scale },
-                ],
-                opacity: opacity,
-              },
-            ]}
-          >
-            {currentItem.type === 'video' ? (
-              videoError ? (
-                <View style={styles.videoErrorContainer}>
-                  <Text style={styles.videoErrorIcon}>🎥</Text>
-                  <Text style={styles.videoErrorTitle}>Video Unavailable</Text>
-                  <Text style={styles.videoErrorText}>
-                    This video cannot be played
-                  </Text>
-                </View>
-              ) : (
-                <Video
-                  key={currentItem.id || currentItem.uri}
-                  source={{ uri: currentItem.uri }}
-                  style={styles.media}
-                  resizeMode="contain"
-                  controls={false}
-                  paused={videoPaused}
-                  repeat={false}
-                  playInBackground={false}
-                  playWhenInactive={false}
-                  ignoreSilentSwitch="ignore"
-                  fullscreen={false}
-                  fullscreenAutorotate={true}
-                  fullscreenOrientation="all"
-                  onError={error => {
-                    setVideoError(true);
-                  }}
-                  onLoad={data => {
-                    setVideoError(false);
-                  }}
-                />
-              )
-            ) : (
-              <Image
-                key={currentItem.id || currentItem.uri}
-                source={{ uri: currentItem.uri }}
-                style={styles.media}
-                resizeMode="contain"
-                onError={() => {
-                  // Image error
-                }}
-                onLoad={() => {
-                  // Image loaded successfully
-                }}
-              />
-            )}
+          <Animated.View style={{ flex: 1 }}>
+            <FlatList
+              ref={flatListRef}
+              data={items}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(item, index) => {
+                // Always include index to ensure uniqueness, even if item.id exists
+                // This prevents duplicate key warnings when items have the same ID
+                const baseKey = item.id || item.uri || `item-${index}`;
+                return `${baseKey}-${index}`;
+              }}
+              initialScrollIndex={
+                hasScrolledToInitial
+                  ? undefined
+                  : initialIndex >= 0 && initialIndex < items.length
+                  ? initialIndex
+                  : 0
+              }
+              getItemLayout={(data, index) => ({
+                length: width,
+                offset: width * index,
+                index,
+              })}
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={viewabilityConfig}
+              onScrollToIndexFailed={info => {
+                // Fallback: scroll to offset if scrollToIndex fails
+                const wait = new Promise(resolve => setTimeout(resolve, 500));
+                wait.then(() => {
+                  if (flatListRef.current) {
+                    flatListRef.current.scrollToOffset({
+                      offset: info.averageItemLength * info.index,
+                      animated: true,
+                    });
+                  }
+                });
+              }}
+              removeClippedSubviews={false}
+              decelerationRate="fast"
+              snapToInterval={width}
+              snapToAlignment="start"
+              maintainVisibleContentPosition={{
+                minIndexForVisible: 0,
+              }}
+              onScrollBeginDrag={() => {
+                // Mark that user has started scrolling, so we don't reset position
+                if (!hasScrolledToInitial) {
+                  setHasScrolledToInitial(true);
+                }
+              }}
+              onEndReached={() => {
+                // Load more items when reaching the end
+                if (monthKey && !isLoadingMoreRef.current) {
+                  const currentItemsLength = itemsRef.current.length;
+                  const content = monthContent[monthKey];
+
+                  if (
+                    currentItemsLength < MAX_ITEMS_IN_VIEWER &&
+                    content &&
+                    content.hasMore &&
+                    !content.isLoading
+                  ) {
+                    isLoadingMoreRef.current = true;
+                    setIsLoading(true);
+                    loadMoreMonthContent(monthKey, BATCH_SIZE)
+                      .catch(error => {
+                        console.error(
+                          '[MediaViewer] ❌ onEndReached - Error loading:',
+                          error,
+                        );
+                      })
+                      .finally(() => {
+                        setIsLoading(false);
+                        isLoadingMoreRef.current = false;
+                      });
+                  }
+                }
+              }}
+              onEndReachedThreshold={0.5}
+              renderItem={({ item, index }) => {
+                const isCurrentItem = index === currentIndex;
+                return (
+                  <View style={styles.mediaItemContainer}>
+                    <TouchableOpacity
+                      style={styles.mediaTouch}
+                      onPress={toggleControls}
+                      activeOpacity={1}
+                    >
+                      <Animated.View
+                        style={[
+                          styles.mediaWrapper,
+                          isCurrentItem
+                            ? {
+                                transform: [{ translateY: translateY }],
+                              }
+                            : {},
+                        ]}
+                      >
+                        {item.type === 'video' ? (
+                          videoError[item.id] ? (
+                            <View style={styles.videoErrorContainer}>
+                              <Text style={styles.videoErrorIcon}>🎥</Text>
+                              <Text style={styles.videoErrorTitle}>
+                                Video Unavailable
+                              </Text>
+                              <Text style={styles.videoErrorText}>
+                                This video cannot be played
+                              </Text>
+                            </View>
+                          ) : (
+                            <Video
+                              source={{ uri: item.uri }}
+                              style={styles.media}
+                              resizeMode="contain"
+                              controls={false}
+                              paused={
+                                videoPaused[item.id] ||
+                                !isCurrentItem ||
+                                isListening
+                              }
+                              repeat={false}
+                              playInBackground={false}
+                              playWhenInactive={false}
+                              ignoreSilentSwitch="ignore"
+                              fullscreen={false}
+                              fullscreenAutorotate={true}
+                              fullscreenOrientation="all"
+                              disableAudioSessionManagement={true}
+                              bufferConfig={{
+                                minBufferMs: 1000,
+                                maxBufferMs: 5000,
+                                bufferForPlaybackMs: 1000,
+                                bufferForPlaybackAfterRebufferMs: 1000,
+                              }}
+                              maxBitRate={2000000}
+                              onError={error => {
+                                setVideoError(prev => ({
+                                  ...prev,
+                                  [item.id]: true,
+                                }));
+                              }}
+                              onLoad={data => {
+                                setVideoError(prev => ({
+                                  ...prev,
+                                  [item.id]: false,
+                                }));
+                              }}
+                              onEnd={() => {
+                                // Cleanup video when it ends
+                              }}
+                            />
+                          )
+                        ) : // Use React Native Image for ph:// URIs (FastImage doesn't support ph://)
+                        item.uri.startsWith('ph://') ? (
+                          <Image
+                            source={{ uri: item.uri }}
+                            style={styles.media}
+                            resizeMode="contain"
+                            onError={() => {
+                              // Image failed to load
+                            }}
+                            onLoad={() => {
+                              // Image loaded successfully
+                            }}
+                          />
+                        ) : (
+                          <FastImage
+                            source={{
+                              uri: item.uri,
+                              priority: isCurrentItem
+                                ? FastImage.priority.high
+                                : FastImage.priority.low,
+                              cache: FastImage.cacheControl.web,
+                            }}
+                            style={styles.media}
+                            resizeMode={FastImage.resizeMode.contain}
+                            onError={() => {
+                              console.error('[MediaViewer] FastImage ERROR:', {
+                                uri: item.uri,
+                                id: item.id,
+                              });
+                            }}
+                            onLoad={() => {
+                              // Image loaded successfully
+                            }}
+                          />
+                        )}
+                      </Animated.View>
+
+                      {/* Viewed Checkmark Badge - only show on current item */}
+                      {isCurrentItem && isCurrentItemViewed && (
+                        <View style={styles.viewedBadge}>
+                          <Text style={styles.viewedCheckmark}>✓</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                );
+              }}
+            />
           </Animated.View>
-
-          {/* Viewed Checkmark Badge - positioned outside animated view to stay fixed */}
-          {isCurrentItemViewed && (
-            <View style={styles.viewedBadge}>
-              <Text style={styles.viewedCheckmark}>✓</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+        </PanGestureHandler>
       </View>
-
-      {/* Gesture Handler Overlay */}
-      <PanGestureHandler
-        onGestureEvent={onGestureEvent}
-        onHandlerStateChange={onHandlerStateChange}
-      >
-        <Animated.View style={styles.gestureOverlay} />
-      </PanGestureHandler>
 
       {/* Only One Item Message */}
       {showOnlyOneMessage && (
@@ -1307,11 +1677,17 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
               <TouchableOpacity
                 style={styles.controlButton}
                 onPress={() => {
-                  setVideoPaused(!videoPaused);
+                  if (isListening) {
+                    stopVoiceRecognition();
+                  }
+                  setVideoPaused(prev => ({
+                    ...prev,
+                    [currentItem.id]: !prev[currentItem.id],
+                  }));
                 }}
               >
                 <Text style={styles.videoControlIcon}>
-                  {videoPaused ? '▶️' : '⏸️'}
+                  {videoPaused[currentItem.id] ? '▶️' : '⏸️'}
                 </Text>
               </TouchableOpacity>
             )}
@@ -1359,8 +1735,10 @@ const styles = StyleSheet.create({
   },
   mediaContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  },
+  mediaItemContainer: {
+    width: width,
+    height: height,
   },
   mediaTouch: {
     flex: 1,
@@ -1368,6 +1746,15 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  verticalGestureOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+    pointerEvents: 'box-none', // Don't block touches, just detect gestures
   },
   mediaWrapper: {
     width: width,

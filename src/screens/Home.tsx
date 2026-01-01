@@ -18,6 +18,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { MediaViewerScreenParams } from './MediaViewerScreen';
+import { MonthSelectionScreenParams } from './MonthSelectionScreen';
+
+type HomeStackParamList = {
+  Home: undefined;
+  MonthSelectionScreen: MonthSelectionScreenParams;
+  MediaViewerScreen: MediaViewerScreenParams;
+};
+
+type HomeNavigationProp = StackNavigationProp<HomeStackParamList>;
 import { setHomeTabPressHandler } from '../context/TabPressContext';
 import LinearGradient from 'react-native-linear-gradient';
 import {
@@ -28,11 +39,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMedia, MediaItem } from '../context/MediaContext';
 import { useAdmin } from '../context/adminContext';
 import MediaViewer from '../components/MediaViewer';
-import MonthSelection from '../components/MonthSelection';
 import { checkMediaPermissionsWithRetry } from '../utils/permissions';
 import { getViewingConfig } from '../constants/app';
-import { MonthSelectionData } from '../utils/mediaScanner';
-import { loadViewedItems } from '../utils/viewedMediaTracker';
+import {
+  loadViewedItems,
+  getLastViewedItemId,
+} from '../utils/viewedMediaTracker';
 
 const backgroundImagePink = require('../assets/bg.png');
 const backgroundImageBlue = require('../assets/bg2.jpg');
@@ -171,7 +183,7 @@ const AbstractLinesBackground: React.FC = () => {
 };
 
 const Home: React.FC = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<HomeNavigationProp>();
   const insets = useSafeAreaInsets();
   const {
     monthSummaries,
@@ -183,7 +195,7 @@ const Home: React.FC = () => {
     hasPermission,
     setHasPermission,
     scanMonthSummaries,
-    scanDuplicates,
+    // scanDuplicates, // REMOVED: Causes memory leak at launch
     loadMonthContent,
     loadMoreMonthContent,
     getMonthItems,
@@ -212,9 +224,6 @@ const Home: React.FC = () => {
   const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [currentViewingMonth, setCurrentViewingMonth] = useState<string>('');
-  const [monthSelectionVisible, setMonthSelectionVisible] = useState(false);
-  const [selectedMonthData, setSelectedMonthData] =
-    useState<MonthSelectionData | null>(null);
   const [selectedMediaType, setSelectedMediaType] = useState<
     'photos' | 'videos' | 'all'
   >('all');
@@ -242,6 +251,17 @@ const Home: React.FC = () => {
   // Cache viewed items Set for performance (avoid reloading on every check)
   const viewedItemsCacheRef = useRef<Set<string> | null>(null);
 
+  // Debounce timer for saving progress (avoid blocking UI on every swipe)
+  const saveProgressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingProgressRef = useRef<{
+    [monthKey: string]: {
+      viewed: number;
+      total: number;
+      remaining: number;
+      started: boolean;
+    };
+  } | null>(null);
+
   // Load viewed items cache on mount
   useEffect(() => {
     const loadCache = async () => {
@@ -256,29 +276,25 @@ const Home: React.FC = () => {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([scanMonthSummaries(), scanDuplicates()]);
+    // REMOVED scanDuplicates - causes memory leak (3GB at launch)
+    await scanMonthSummaries();
     setRefreshing(false);
   };
 
   const handleMonthPress = async (monthKey: string) => {
     // Find the month summary to get the counts
     const monthSummary = monthSummaries.find(m => m.monthKey === monthKey);
+
     if (!monthSummary) {
       Alert.alert('Error', 'Month data not found');
       return;
     }
 
-    // Create month selection data
-    const monthData: MonthSelectionData = {
+    // Navigate to MonthSelectionScreen
+    navigation.navigate('MonthSelectionScreen', {
       monthKey: monthSummary.monthKey,
       monthName: monthSummary.monthName,
-      photoCount: monthSummary.photoCount || 0,
-      videoCount: monthSummary.videoCount || 0,
-      totalCount: monthSummary.totalCount || 0,
-    };
-
-    setSelectedMonthData(monthData);
-    setMonthSelectionVisible(true);
+    });
   };
 
   const handleCloseViewer = async () => {
@@ -295,13 +311,12 @@ const Home: React.FC = () => {
     }
 
     // Refresh completion status and progress for the month that was being viewed
-    // Wait a bit for storage to be updated from MediaViewer
     if (
       viewingMonth &&
       !viewingMonth.startsWith('TIME_FILTER_') &&
       !viewingMonth.startsWith('SOURCE_FILTER_')
     ) {
-      setTimeout(async () => {
+      (async () => {
         try {
           // Check completion status
           const { isMonthCompleted } = await import(
@@ -313,36 +328,57 @@ const Home: React.FC = () => {
             [viewingMonth]: isCompleted,
           }));
 
-          // Update progress
+          // Update progress - force immediate save on viewer close
           const stats = await getMonthViewedStats(viewingMonth);
           const started = stats.viewedCount > 0;
           const remaining = stats.totalCount - stats.viewedCount;
-          setMonthViewingProgress(prev => ({
-            ...prev,
-            [viewingMonth]: {
-              viewed: stats.viewedCount,
-              total: stats.totalCount,
-              remaining,
-              started,
-            },
-          }));
+          setMonthViewingProgress(prev => {
+            const newProgress = {
+              ...prev,
+              [viewingMonth]: {
+                viewed: stats.viewedCount,
+                total: stats.totalCount,
+                remaining,
+                started,
+              },
+            };
+            // Save immediately on viewer close (don't debounce)
+            // Clear any pending debounced save first
+            if (saveProgressTimerRef.current) {
+              clearTimeout(saveProgressTimerRef.current);
+              saveProgressTimerRef.current = null;
+            }
+            // Save the new progress state immediately
+            (async () => {
+              try {
+                await AsyncStorage.setItem(
+                  'monthViewingProgress',
+                  JSON.stringify(newProgress),
+                );
+                pendingProgressRef.current = null;
+              } catch (error) {
+                // Error saving month viewing progress
+              }
+            })();
+            return newProgress;
+          });
         } catch (error) {
           // Error checking completion status
         }
-      }, 1500); // Wait 1.5s for storage to be saved
+      })();
     }
   };
 
-  // Close media viewer and month selection when Home tab is pressed while they are open
+  // Close media viewer when Home tab is pressed while it is open
   const modalOpenTimeRef = useRef(0);
   const isHomeFocusedRef = useRef(false);
 
   // Track when modals are opened
   useEffect(() => {
-    if (viewerVisible || monthSelectionVisible) {
+    if (viewerVisible) {
       modalOpenTimeRef.current = Date.now();
     }
-  }, [viewerVisible, monthSelectionVisible]);
+  }, [viewerVisible]);
 
   // Register handler for Home tab press
   useEffect(() => {
@@ -355,9 +391,6 @@ const Home: React.FC = () => {
           if (viewerVisible) {
             handleCloseViewer();
           }
-          if (monthSelectionVisible) {
-            handleCloseMonthSelection();
-          }
         }
       }
     };
@@ -367,7 +400,7 @@ const Home: React.FC = () => {
     return () => {
       setHomeTabPressHandler(null);
     };
-  }, [viewerVisible, monthSelectionVisible]);
+  }, [viewerVisible]);
 
   // Load skin preference function
   const loadSkinPreference = async () => {
@@ -381,12 +414,92 @@ const Home: React.FC = () => {
     }
   };
 
+  // Save month viewing progress to storage (debounced to avoid blocking UI)
+  const saveMonthViewingProgress = (progress: {
+    [monthKey: string]: {
+      viewed: number;
+      total: number;
+      remaining: number;
+      started: boolean;
+    };
+  }) => {
+    // Store pending progress
+    pendingProgressRef.current = progress;
+
+    // Clear existing timer
+    if (saveProgressTimerRef.current) {
+      clearTimeout(saveProgressTimerRef.current);
+    }
+
+    // Debounce save operation (save 1 second after last update)
+    saveProgressTimerRef.current = setTimeout(async () => {
+      if (pendingProgressRef.current) {
+        try {
+          await AsyncStorage.setItem(
+            'monthViewingProgress',
+            JSON.stringify(pendingProgressRef.current),
+          );
+        } catch (error) {
+          // Error saving month viewing progress
+        }
+        pendingProgressRef.current = null;
+      }
+      saveProgressTimerRef.current = null;
+    }, 1000);
+  };
+
+  // Force immediate save (call on viewer close)
+  const saveMonthViewingProgressImmediately = async () => {
+    // Clear any pending debounced save
+    if (saveProgressTimerRef.current) {
+      clearTimeout(saveProgressTimerRef.current);
+      saveProgressTimerRef.current = null;
+    }
+
+    // Save current state immediately
+    if (pendingProgressRef.current) {
+      try {
+        await AsyncStorage.setItem(
+          'monthViewingProgress',
+          JSON.stringify(pendingProgressRef.current),
+        );
+        pendingProgressRef.current = null;
+      } catch (error) {
+        // Error saving month viewing progress
+      }
+    }
+  };
+
+  // Load month viewing progress from storage
+  const loadMonthViewingProgress = async (): Promise<{
+    [monthKey: string]: {
+      viewed: number;
+      total: number;
+      remaining: number;
+      started: boolean;
+    };
+  }> => {
+    try {
+      const stored = await AsyncStorage.getItem('monthViewingProgress');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (error) {
+      // Error loading month viewing progress
+    }
+    return {};
+  };
+
   // Load and update month completion status and progress
   // Extract as a reusable function so it can be called from multiple places
+  // MEMORY FIX: Only process first 10 months to prevent memory spike
   const loadMonthStatus = React.useCallback(async () => {
     if (monthSummaries.length === 0) return;
 
     const status: { [monthKey: string]: boolean } = {};
+
+    // Load persisted progress from storage first (fast)
+    const persistedProgress = await loadMonthViewingProgress();
     const progress: {
       [monthKey: string]: {
         viewed: number;
@@ -394,9 +507,12 @@ const Home: React.FC = () => {
         remaining: number;
         started: boolean;
       };
-    } = {};
+    } = { ...persistedProgress };
 
-    for (const summary of monthSummaries) {
+    // MEMORY FIX: Only process first 10 months to prevent loading thousands of items
+    const monthsToProcess = monthSummaries.slice(0, 10);
+
+    for (const summary of monthsToProcess) {
       try {
         // Check completion status
         const { isMonthCompleted } = await import(
@@ -404,37 +520,66 @@ const Home: React.FC = () => {
         );
         status[summary.monthKey] = await isMonthCompleted(summary.monthKey);
 
-        // Get progress stats
-        const stats = await getMonthViewedStats(summary.monthKey);
-        const started = stats.viewedCount > 0;
-        const remaining = stats.totalCount - stats.viewedCount;
-
-        progress[summary.monthKey] = {
-          viewed: stats.viewedCount,
-          total: stats.totalCount,
-          remaining,
-          started,
-        };
+        // Use persisted progress if available, otherwise initialize with summary data
+        const existingProgress = persistedProgress[summary.monthKey];
+        if (existingProgress) {
+          // Use persisted data - it's already loaded from storage
+          progress[summary.monthKey] = existingProgress;
+        } else {
+          // No persisted data - initialize with summary data
+          const totalCount = summary.totalCount || 0;
+          progress[summary.monthKey] = {
+            viewed: 0,
+            total: totalCount,
+            remaining: totalCount,
+            started: false,
+          };
+        }
       } catch (error) {
-        status[summary.monthKey] = false;
-        progress[summary.monthKey] = {
-          viewed: 0,
-          total: 0,
-          remaining: 0,
-          started: false,
-        };
+        // On error, still check completion status but use defaults for progress
+        try {
+          const { isMonthCompleted } = await import(
+            '../utils/viewedMediaTracker'
+          );
+          status[summary.monthKey] = await isMonthCompleted(summary.monthKey);
+        } catch (e) {
+          status[summary.monthKey] = false;
+        }
+        // Use persisted progress if available, otherwise use defaults
+        const existingProgress = persistedProgress[summary.monthKey];
+        if (existingProgress) {
+          progress[summary.monthKey] = existingProgress;
+        } else {
+          progress[summary.monthKey] = {
+            viewed: 0,
+            total: summary.totalCount || 0,
+            remaining: summary.totalCount || 0,
+            started: false,
+          };
+        }
       }
+
+      // MEMORY FIX: Add small delay between months to prevent memory spike
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
     // Use functional update to ensure state is set even if component re-renders
     // Force update by creating new objects to ensure React detects the change
     // Update both states and statusLoaded together to ensure re-render
+    // IMPORTANT: Preserve existing progress when updating - only overwrite if month doesn't have progress
     setMonthCompletionStatus(prev => {
       const newStatus = { ...prev, ...status };
       // Return new object even if values are the same to force re-render
       return newStatus;
     });
     setMonthViewingProgress(prev => {
-      const newProgress = { ...prev, ...progress };
+      // Always update progress from storage when loading month status
+      // This ensures progress is refreshed when returning from MediaViewerScreen
+      const newProgress = { ...prev };
+      for (const monthKey in progress) {
+        // Always use persisted progress from storage if available (it's the source of truth)
+        // This ensures we get the latest progress when returning from MediaViewerScreen
+        newProgress[monthKey] = progress[monthKey];
+      }
       // Return new object even if values are the same to force re-render
       return newProgress;
     });
@@ -463,11 +608,6 @@ const Home: React.FC = () => {
       };
     }, [loadMonthStatus]),
   );
-
-  const handleCloseMonthSelection = () => {
-    setMonthSelectionVisible(false);
-    setSelectedMonthData(null);
-  };
 
   const handleToggleTheme = async () => {
     const newSkin = skin === 'pink' ? 'blue' : 'pink';
@@ -551,110 +691,34 @@ const Home: React.FC = () => {
     }
   };
 
-  const handleSelectPhotos = async () => {
-    if (!selectedMonthData) return;
-
-    setSelectedMediaType('photos');
-    setMonthSelectionVisible(false);
-
-    // Check viewing limits before fetching
-    if (!canViewMedia()) {
-      setViewerInitialIndex(0);
-      setViewerVisible(true);
-      setCurrentViewingMonth(selectedMonthData.monthKey);
-      return;
-    }
+  // Helper function to get the starting index for a month
+  // Tries to resume from last viewed item for this month, falls back to first unviewed item
+  const getStartingIndex = async (
+    items: MediaItem[],
+    monthKey: string,
+  ): Promise<number> => {
+    if (items.length === 0) return 0;
 
     try {
-      // Load first 40 items
-      const monthItems = await loadMonthContent(selectedMonthData.monthKey, 40);
-      const photoItems = monthItems.filter(item => item.type === 'photo');
+      // First, try to get the last viewed item ID for this month
+      const lastViewedItemId = await getLastViewedItemId(monthKey);
 
-      if (photoItems.length > 0) {
-        // Find the first unviewed item to start from
-        const startIndex = await findFirstUnviewedIndex(photoItems);
-        setViewerInitialIndex(startIndex);
-        setViewerVisible(true);
-        setCurrentViewingMonth(selectedMonthData.monthKey);
-      } else {
-        Alert.alert(
-          'No Photos',
-          `No photos found for ${selectedMonthData.monthName}`,
+      if (lastViewedItemId) {
+        // Find that item in the current items array
+        const foundIndex = items.findIndex(
+          item => item.id === lastViewedItemId,
         );
+        if (foundIndex >= 0) {
+          // Resume from where user left off in this month
+          return foundIndex;
+        }
       }
+
+      // If last viewed item not found in current array, fall back to finding first unviewed item
+      return await findFirstUnviewedIndex(items);
     } catch (error) {
-      Alert.alert('Error', 'Failed to load photos for this month');
-    }
-  };
-
-  const handleSelectVideos = async () => {
-    if (!selectedMonthData) return;
-
-    setSelectedMediaType('videos');
-    setMonthSelectionVisible(false);
-
-    // Check viewing limits before fetching
-    if (!canViewMedia()) {
-      setViewerInitialIndex(0);
-      setViewerVisible(true);
-      setCurrentViewingMonth(selectedMonthData.monthKey);
-      return;
-    }
-
-    try {
-      // Load first 40 items
-      const monthItems = await loadMonthContent(selectedMonthData.monthKey, 40);
-      const videoItems = monthItems.filter(item => item.type === 'video');
-
-      if (videoItems.length > 0) {
-        // Find the first unviewed item to start from
-        const startIndex = await findFirstUnviewedIndex(videoItems);
-        setViewerInitialIndex(startIndex);
-        setViewerVisible(true);
-        setCurrentViewingMonth(selectedMonthData.monthKey);
-      } else {
-        Alert.alert(
-          'No Videos',
-          `No videos found for ${selectedMonthData.monthName}`,
-        );
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to load videos for this month');
-    }
-  };
-
-  const handleSelectAllMedia = async () => {
-    if (!selectedMonthData) return;
-
-    setSelectedMediaType('all');
-    setMonthSelectionVisible(false);
-
-    // Check viewing limits before fetching
-    if (!canViewMedia()) {
-      setViewerInitialIndex(0);
-      setViewerVisible(true);
-      setCurrentViewingMonth(selectedMonthData.monthKey);
-      return;
-    }
-
-    try {
-      // Load first 40 items
-      const monthItems = await loadMonthContent(selectedMonthData.monthKey, 40);
-
-      if (monthItems.length > 0) {
-        // Find the first unviewed item to start from
-        const startIndex = await findFirstUnviewedIndex(monthItems);
-        setViewerInitialIndex(startIndex);
-        setViewerVisible(true);
-        setCurrentViewingMonth(selectedMonthData.monthKey);
-      } else {
-        Alert.alert(
-          'No Media',
-          `No media found for ${selectedMonthData.monthName}`,
-        );
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to load media for this month');
+      // On error, fall back to first unviewed index
+      return await findFirstUnviewedIndex(items);
     }
   };
 
@@ -775,7 +839,8 @@ const Home: React.FC = () => {
       if (!monthContent[relevantMonthKey]) {
         try {
           // Load with a reasonable limit to prevent memory issues
-          const items = await loadMonthContent(relevantMonthKey, 200);
+          // MEMORY FIX: Reduced from 200 to 20 items to prevent memory bloat
+          const items = await loadMonthContent(relevantMonthKey, 20);
           if (items.length > 0) {
             allItems.push(...items);
           }
@@ -818,34 +883,47 @@ const Home: React.FC = () => {
       !currentViewingMonth.startsWith('TIME_FILTER_') &&
       !currentViewingMonth.startsWith('SOURCE_FILTER_')
     ) {
-      // Update progress immediately to prevent double counting
-      const stats = await getMonthViewedStats(currentViewingMonth);
-      const remaining = stats.totalCount - stats.viewedCount;
-      const started = stats.viewedCount > 0;
+      // Get total count from summary (fast, no item loading)
+      const summary = monthSummaries.find(
+        m => m.monthKey === currentViewingMonth,
+      );
+      const totalCount = summary?.totalCount || 0;
+      const remaining = totalCount - viewedCount;
+      const started = viewedCount > 0;
 
-      setMonthViewingProgress(prev => ({
-        ...prev,
-        [currentViewingMonth]: {
-          viewed: stats.viewedCount,
-          total: stats.totalCount,
-          remaining,
-          started,
-        },
-      }));
+      const updatedProgress = {
+        viewed: viewedCount,
+        total: totalCount,
+        remaining,
+        started,
+      };
 
-      // Also check completion status immediately so checkmark appears right away
-      // This is especially important when liquidglass is not available
-      try {
-        const { isMonthCompleted } = await import(
-          '../utils/viewedMediaTracker'
-        );
-        const isCompleted = await isMonthCompleted(currentViewingMonth);
-        setMonthCompletionStatus(prev => ({
+      // Update state immediately (fast, no blocking)
+      setMonthViewingProgress(prev => {
+        const newProgress = {
           ...prev,
-          [currentViewingMonth]: isCompleted,
-        }));
-      } catch (error) {
-        // Error checking completion status in handleViewProgress
+          [currentViewingMonth]: updatedProgress,
+        };
+        // Save to storage (debounced, non-blocking)
+        saveMonthViewingProgress(newProgress);
+        return newProgress;
+      });
+
+      // Check completion status periodically (not on every swipe)
+      // Only check every 5 items to avoid blocking
+      if (viewedCount % 5 === 0 || remaining === 0) {
+        try {
+          const { isMonthCompleted } = await import(
+            '../utils/viewedMediaTracker'
+          );
+          const isCompleted = await isMonthCompleted(currentViewingMonth);
+          setMonthCompletionStatus(prev => ({
+            ...prev,
+            [currentViewingMonth]: isCompleted,
+          }));
+        } catch (error) {
+          // Error checking completion status in handleViewProgress
+        }
       }
     }
   };
@@ -855,7 +933,8 @@ const Home: React.FC = () => {
       const hasPermission = await checkMediaPermissionsWithRetry();
       if (hasPermission) {
         setHasPermission(true);
-        await Promise.all([scanMonthSummaries(), scanDuplicates()]);
+        // REMOVED scanDuplicates - causes memory leak (3GB at launch)
+        await scanMonthSummaries();
       } else {
         Alert.alert(
           'Permission Required',
@@ -883,9 +962,29 @@ const Home: React.FC = () => {
 
   useEffect(() => {
     if (hasPermission && monthSummaries.length === 0) {
-      Promise.all([scanMonthSummaries(), scanDuplicates()]);
+      // REMOVED scanDuplicates - causes memory leak (3GB at launch)
+      scanMonthSummaries();
     }
   }, [hasPermission]);
+
+  // Cleanup save timer on unmount
+  useEffect(() => {
+    return () => {
+      if (saveProgressTimerRef.current) {
+        clearTimeout(saveProgressTimerRef.current);
+        saveProgressTimerRef.current = null;
+      }
+      // Save any pending progress before unmounting
+      if (pendingProgressRef.current) {
+        AsyncStorage.setItem(
+          'monthViewingProgress',
+          JSON.stringify(pendingProgressRef.current),
+        ).catch(() => {
+          // Error saving on unmount
+        });
+      }
+    };
+  }, []);
 
   // Load hide preferences function
   const loadHidePreferences = async () => {
@@ -917,57 +1016,17 @@ const Home: React.FC = () => {
   }, [loadMonthStatus]);
 
   // Refresh completion status periodically and when content changes
+  // MEMORY FIX: Disabled automatic refresh to prevent loading all months
+  // Only refresh when viewer closes, not periodically
   useEffect(() => {
-    let isRefreshing = false; // Prevent concurrent refreshes
+    // DISABLED: This was causing all months to load on startup
+    // The refreshStatus function was calling getMonthViewedStats for ALL months
+    // which triggered loading 200 items per month. This is now disabled.
+    // Status will be refreshed when viewer closes (handled in handleCloseViewer)
 
-    const refreshStatus = async () => {
-      // Prevent double counting by skipping if already refreshing
-      if (isRefreshing) return;
-      isRefreshing = true;
-
-      try {
-        const status: { [monthKey: string]: boolean } = {};
-        const progress: {
-          [monthKey: string]: {
-            viewed: number;
-            total: number;
-            remaining: number;
-            started: boolean;
-          };
-        } = {};
-
-        for (const summary of monthSummaries) {
-          try {
-            const { isMonthCompleted } = await import(
-              '../utils/viewedMediaTracker'
-            );
-            status[summary.monthKey] = await isMonthCompleted(summary.monthKey);
-
-            // Get progress stats
-            const stats = await getMonthViewedStats(summary.monthKey);
-            const started = stats.viewedCount > 0;
-            const remaining = stats.totalCount - stats.viewedCount;
-
-            progress[summary.monthKey] = {
-              viewed: stats.viewedCount,
-              total: stats.totalCount,
-              remaining,
-              started,
-            };
-          } catch (error) {
-            status[summary.monthKey] = false;
-          }
-        }
-        setMonthCompletionStatus(prev => ({ ...prev, ...status }));
-        setMonthViewingProgress(prev => ({ ...prev, ...progress }));
-      } finally {
-        isRefreshing = false;
-      }
+    return () => {
+      // Cleanup if needed
     };
-
-    // Refresh when viewer closes or periodically
-    const interval = setInterval(refreshStatus, 3000);
-    return () => clearInterval(interval);
   }, [monthSummaries, viewerVisible]);
 
   if (!hasPermission) {
@@ -1650,17 +1709,6 @@ const Home: React.FC = () => {
               />
             </ScrollView>
           </View>
-        )}
-
-        {/* Month Selection Modal */}
-        {monthSelectionVisible && selectedMonthData && (
-          <MonthSelection
-            monthData={selectedMonthData}
-            onSelectPhotos={handleSelectPhotos}
-            onSelectVideos={handleSelectVideos}
-            onSelectAllMedia={handleSelectAllMedia}
-            onClose={handleCloseMonthSelection}
-          />
         )}
 
         {/* Media Viewer Modal */}
