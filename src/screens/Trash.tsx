@@ -22,6 +22,7 @@ const Trash: React.FC = () => {
     restoreFromTrash,
     deleteFromTrash,
     deleteBatchFromTrash,
+    restoreBatchFromTrash,
   } = useMedia();
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
@@ -111,6 +112,12 @@ const Trash: React.FC = () => {
         },
       ],
     );
+  };
+
+  const handleRestoreAll = async () => {
+    await restoreBatchFromTrash(trashedItems);
+    setSelectedItems(new Set());
+    setSelectionMode(false);
   };
 
   const handleBulkRestore = () => {
@@ -222,12 +229,20 @@ const Trash: React.FC = () => {
             </TouchableOpacity>
           ) : (
             trashedItems.length > 0 && (
-              <TouchableOpacity
-                onPress={handleDeleteAll}
-                style={styles.deleteAllButton}
-              >
-                <Text style={styles.deleteAllText}>Delete All</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  onPress={handleRestoreAll}
+                  style={styles.restoreAllButton}
+                >
+                  <Text style={styles.deleteAllText}>Restore All</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleDeleteAll}
+                  style={styles.deleteAllButton}
+                >
+                  <Text style={styles.deleteAllText}>Delete All</Text>
+                </TouchableOpacity>
+              </>
             )
           )}
         </View>
@@ -428,6 +443,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: '#dc3545',
     borderRadius: 8,
+  },
+  restoreAllButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#28a745',
+    borderRadius: 8,
+    marginRight: 8,
   },
   deleteAllText: {
     color: '#ffffff',

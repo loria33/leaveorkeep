@@ -422,13 +422,6 @@ const onboardingSteps = [
   //   icon: '🎙️',
   // },
   {
-    type: 'interactive_swipe',
-    title: 'Learn the Gestures',
-    subtitle: 'Try the swipe gestures',
-    description: 'Swipe left, then right, then up to continue',
-    image: require('../assets/logoinApp.png'),
-  },
-  {
     title: 'Ready to Start? 🚀',
     subtitle: 'We need permission to access your photos',
     description:

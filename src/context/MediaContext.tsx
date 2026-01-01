@@ -101,6 +101,8 @@ export interface MediaContextType {
   restoreFromTrash: (item: MediaItem) => void;
   deleteFromTrash: (item: MediaItem) => Promise<void>;
   deleteBatchFromTrash: (items: MediaItem[]) => Promise<void>;
+  restoreBatchFromTrash: (items: MediaItem[]) => Promise<void>;
+
   setHasPermission: (hasPermission: boolean) => void;
   setOnboardingComplete: (complete: boolean) => void;
 
@@ -787,6 +789,60 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     }
   };
 
+  const restoreBatchFromTrash = async (items: MediaItem[]) => {
+    if (!items || items.length === 0) return;
+
+    const restoreIds = new Set(items.map(i => i.id));
+
+    // 1) Remove all from trash in one update
+    setTrashedItems(prev => prev.filter(i => !restoreIds.has(i.id)));
+
+    // 2) Add back to legacy mediaItems in one update
+    setMediaItems(prev => {
+      // avoid duplicates if something already exists in mediaItems
+      const existing = new Set(prev.map(i => i.id));
+      const toAdd = items.filter(i => !existing.has(i.id));
+      return [...prev, ...toAdd];
+    });
+
+    // 3) Add back to monthContent (only for months currently loaded)
+    setMonthContent(prev => {
+      // group restored items by monthKey
+      const byMonth: Record<string, MediaItem[]> = {};
+      for (const item of items) {
+        const d = new Date(item.timestamp);
+        const monthKey = `${d.getFullYear()}-${String(
+          d.getMonth() + 1,
+        ).padStart(2, '0')}`;
+        (byMonth[monthKey] ||= []).push(item);
+      }
+
+      let changed = false;
+      const next = { ...prev };
+
+      for (const monthKey of Object.keys(byMonth)) {
+        const existingContent = prev[monthKey];
+        if (!existingContent) {
+          // month not loaded in memory; skip (matches your single restore behavior)
+          continue;
+        }
+
+        const existingIds = new Set(existingContent.items.map(i => i.id));
+        const toAdd = byMonth[monthKey].filter(i => !existingIds.has(i.id));
+
+        if (toAdd.length > 0) {
+          changed = true;
+          next[monthKey] = {
+            ...existingContent,
+            items: [...existingContent.items, ...toAdd],
+          };
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  };
+
   const deleteFromTrash = async (item: MediaItem) => {
     setTrashedItems(prev => prev.filter(i => i.id !== item.id));
 
@@ -1140,6 +1196,7 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     setMediaItems,
     addToTrash,
     restoreFromTrash,
+    restoreBatchFromTrash,
     deleteFromTrash,
     deleteBatchFromTrash,
     setHasPermission: handleSetPermission,
