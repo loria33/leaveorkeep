@@ -7,7 +7,9 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "openStudio": "open -a 'Android Studio' .",
+    "runAndroid": "npx @react-native-community/cli run-android"
   },
   "dependencies": {
     "@callstack/liquid-glass": "^0.6.1",
