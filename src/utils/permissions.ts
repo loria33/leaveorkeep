@@ -1,5 +1,11 @@
 import { Alert, Platform } from 'react-native';
-import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions';
+import {
+  check,
+  request,
+  PERMISSIONS,
+  RESULTS,
+  requestMultiple,
+} from 'react-native-permissions';
 
 export const MEDIA_PERMISSIONS = {
   ios: [PERMISSIONS.IOS.PHOTO_LIBRARY],
@@ -37,42 +43,49 @@ export const debugPermissionState = async (): Promise<void> => {
 };
 
 export const requestMediaPermissions = async (): Promise<boolean> => {
-  await debugPermissionState();
-
   try {
+    debugger;
+
     const permissions =
       Platform.OS === 'ios' ? MEDIA_PERMISSIONS.ios : MEDIA_PERMISSIONS.android;
-    const results = await Promise.all(
-      permissions.map(permission => request(permission)),
-    );
 
     // For iOS, we accept both GRANTED and LIMITED permissions
     if (Platform.OS === 'ios') {
+      const results = await Promise.all(
+        permissions.map(permission => request(permission)),
+      );
       const hasPermission =
         results[0] === RESULTS.GRANTED || results[0] === RESULTS.LIMITED;
       // On iPad, sometimes there's a delay before the permission is properly registered
       // If we got permission but it's on iOS, let's double-check after a short delay
       if (hasPermission && Platform.OS === 'ios') {
         await delay(1000); // Wait 1 second for iOS to register the permission
-        return checkMediaPermissionsWithRetry();
+        return await checkMediaPermissionsWithRetry();
       }
       return hasPermission;
-    }
+    } else {
+      const results = await requestMultiple(permissions);
+      const hasPermission =
+        results[PERMISSIONS.ANDROID.READ_EXTERNAL_STORAGE] ===
+          RESULTS.GRANTED ||
+        results[PERMISSIONS.ANDROID.READ_MEDIA_IMAGES] === RESULTS.GRANTED ||
+        results[PERMISSIONS.ANDROID.READ_MEDIA_VIDEO] === RESULTS.GRANTED;
 
-    // For Android, handle LIMITED (Android 14+ selected photos)
-    if (results.includes(RESULTS.LIMITED)) {
-      Alert.alert(
-        'Limited Access',
-        'You have granted access to only selected photos. Some features may not work. To enable full functionality, please allow access to all photos in your device settings.',
-      );
-      return true; // Ensure you return after showing the alert
-    }
+      // // For Android, handle LIMITED (Android 14+ selected photos)
+      // if (results.includes(RESULTS.LIMITED)) {
+      //   Alert.alert(
+      //     'Limited Access',
+      //     'You have granted access to only selected photos. Some features may not work. To enable full functionality, please allow access to all photos in your device settings.',
+      //   );
+      //   return true; // Ensure you return after showing the alert
+      // }
 
-    // For Android, we need at least one read permission
-    const hasReadPermission = results.some(
-      result => result === RESULTS.GRANTED,
-    );
-    return hasReadPermission;
+      // // For Android, we need at least one read permission
+      // const hasReadPermission = results.some(
+      //   result => result === RESULTS.GRANTED,
+      // );
+      return hasPermission;
+    }
   } catch (error) {
     // If permission request fails, try to check current permissions as fallback
     const fallback = await checkMediaPermissionsWithRetry();
@@ -178,19 +191,20 @@ export const checkSpeechRecognitionPermission = async (): Promise<boolean> => {
   }
 };
 
-export const requestSpeechRecognitionPermission = async (): Promise<boolean> => {
-  try {
-    if (Platform.OS === 'ios') {
-      const status = await request(PERMISSIONS.IOS.SPEECH_RECOGNITION);
-      return status === RESULTS.GRANTED;
-    } else {
-      // Android uses RECORD_AUDIO for speech recognition
-      const status = await request(PERMISSIONS.ANDROID.RECORD_AUDIO);
-      return status === RESULTS.GRANTED;
+export const requestSpeechRecognitionPermission =
+  async (): Promise<boolean> => {
+    try {
+      if (Platform.OS === 'ios') {
+        const status = await request(PERMISSIONS.IOS.SPEECH_RECOGNITION);
+        return status === RESULTS.GRANTED;
+      } else {
+        // Android uses RECORD_AUDIO for speech recognition
+        const status = await request(PERMISSIONS.ANDROID.RECORD_AUDIO);
+        return status === RESULTS.GRANTED;
+      }
+    } catch (error) {
+      return false;
     }
-  } catch (error) {
-    return false;
-  }
-};
+  };
 
 // PermissionsAndroid and requestNativeAndroidMediaPermission have been removed. All permission logic now uses only react-native-permissions.
