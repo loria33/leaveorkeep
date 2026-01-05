@@ -947,16 +947,17 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       isStoppingRef.current = true;
 
       // Stop any pending partial commit
-      if (partialCommitTimerRef.current) {
-        clearTimeout(partialCommitTimerRef.current);
-        partialCommitTimerRef.current = null;
-      }
-      lastPartialRef.current = '';
+    if (partialCommitTimerRef.current) {
+      clearTimeout(partialCommitTimerRef.current);
+      partialCommitTimerRef.current = null;
+    }
+    lastPartialRef.current = '';
+    lastProcessedTranscriptRef.current = '';
 
-      await Voice.stop();
-      setIsListening(false);
-      setVoiceTranscript('');
-      pendingNavRef.current = false;
+    await Voice.stop();
+    setIsListening(false);
+    setVoiceTranscript('');
+    pendingNavRef.current = false;
       commandConsumedForItemRef.current = null;
 
       if (voiceTimeoutRef.current) {
@@ -1040,6 +1041,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         clearTimeout(voiceTimeoutRef.current);
         voiceTimeoutRef.current = null;
       }
+      lastProcessedTranscriptRef.current = '';
       if (partialCommitTimerRef.current) {
         clearTimeout(partialCommitTimerRef.current);
         partialCommitTimerRef.current = null;
@@ -1122,6 +1124,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       // Reset per-item gates for current item when starting fresh
       pendingNavRef.current = false;
       commandConsumedForItemRef.current = null;
+      lastProcessedTranscriptRef.current = '';
 
       // Clear any pending partial debounce
       if (partialCommitTimerRef.current) {
@@ -1439,7 +1442,12 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
                   }
                 });
               }}
-              removeClippedSubviews={false}
+              removeClippedSubviews={Platform.OS === 'android'}
+              windowSize={Platform.OS === 'android' ? 2 : 5}
+              initialNumToRender={Platform.OS === 'android' ? 1 : 2}
+              maxToRenderPerBatch={Platform.OS === 'android' ? 1 : 2}
+              updateCellsBatchingPeriod={Platform.OS === 'android' ? 16 : 50}
+              scrollEventThrottle={16}
               decelerationRate="fast"
               snapToInterval={width}
               snapToAlignment="start"
