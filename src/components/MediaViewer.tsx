@@ -93,7 +93,9 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   // Navigation lock lives in refs so async callbacks always see the live value
   const isNavigatingRef = useRef(false);
   const navigationStartIndexRef = useRef<number | null>(null);
-  const navigationFailsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navigationFailsafeRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [videoError, setVideoError] = useState<{ [key: string]: boolean }>({});
   const [videoPaused, setVideoPaused] = useState<{ [key: string]: boolean }>(
     {},
@@ -134,7 +136,9 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   // ===== VOICE: ONE COMMAND PER ITEM (HARD GATE) =====
   const commandConsumedForItemRef = useRef<string | null>(null); // item.id that already consumed a command
   const pendingNavRef = useRef<boolean>(false); // blocks until FlatList actually changes item (currentIndex changes)
-  const partialCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const partialCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const lastPartialRef = useRef<string>('');
   const lastProcessedTranscriptRef = useRef<string>(''); // global, not per-item
   const lastExecutedCommandSignatureRef = useRef<string>('');
@@ -291,10 +295,10 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     mediaType === 'photos'
       ? 'photo'
       : mediaType === 'videos'
-        ? 'video'
-        : mediaType === 'all'
-          ? 'all'
-          : getMediaTypeFilter(initialItems),
+      ? 'video'
+      : mediaType === 'all'
+      ? 'all'
+      : getMediaTypeFilter(initialItems),
   );
   const filterItems = (allItems: MediaItem[]): MediaItem[] => {
     const filterType = mediaTypeFilterRef.current;
@@ -479,8 +483,9 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         setItems(limitedItems);
         itemsRef.current = limitedItems;
         lastProcessedContentLengthRef.current = initialItems.length;
-        lastProcessedContentSignatureRef.current = `${initialItems.length}-${initialItems[0]?.id || ''
-          }`;
+        lastProcessedContentSignatureRef.current = `${initialItems.length}-${
+          initialItems[0]?.id || ''
+        }`;
         hasInitializedFromPropsRef.current = true;
         isProcessingRef.current = false;
       }
@@ -625,7 +630,9 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   // Month-wide progress = (viewed count scanned once when the viewer opened) + (items
   // newly marked in this session). Swipes never rescan the month; the parent runs the
   // definitive scan when the viewer closes.
-  const viewedBaselineRef = useRef<{ viewed: number; total: number } | null>(null);
+  const viewedBaselineRef = useRef<{ viewed: number; total: number } | null>(
+    null,
+  );
   const newlyViewedCountRef = useRef(0);
   const completionRequestedRef = useRef(false);
   const closedViaButtonRef = useRef(false);
@@ -642,11 +649,16 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     if (!isTrackableMonth(key) || !baseline) return;
 
     const rawViewed = baseline.viewed + newlyViewedCountRef.current;
-    const viewed = baseline.total > 0 ? Math.min(baseline.total, rawViewed) : rawViewed;
+    const viewed =
+      baseline.total > 0 ? Math.min(baseline.total, rawViewed) : rawViewed;
     onViewProgressRef.current?.(viewed, baseline.total);
 
     // Everything has been seen: ask for the definitive check once
-    if (baseline.total > 0 && viewed >= baseline.total && !completionRequestedRef.current) {
+    if (
+      baseline.total > 0 &&
+      viewed >= baseline.total &&
+      !completionRequestedRef.current
+    ) {
       completionRequestedRef.current = true;
       checkAndMarkMonthCompletedRef.current(key).catch(() => {
         completionRequestedRef.current = false;
@@ -1010,7 +1022,10 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       }
       // onViewableItemsChanged updates currentIndex. The failsafe always runs, so a
       // missing momentum-end event can never leave the viewer locked.
-      navigationFailsafeRef.current = setTimeout(() => finishNavigation(true), 600);
+      navigationFailsafeRef.current = setTimeout(
+        () => finishNavigation(true),
+        600,
+      );
 
       flatListRef.current.scrollToIndex({
         index: finalTargetIndex,
@@ -1217,7 +1232,8 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       const item = itemsRef.current[currentIndexRef.current];
       if (!item) return;
 
-      const cmdRegex = /\b(keep|swipe|next|continue|trash|flick|delete|remove)\b/g;
+      const cmdRegex =
+        /\b(keep|swipe|next|continue|trash|flick|delete|remove)\b/g;
       const currentCommands: string[] = [];
       let match: RegExpExecArray | null;
       while ((match = cmdRegex.exec(normalized)) !== null) {
@@ -1230,11 +1246,9 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       if (commandSignature === lastExecutedCommandSignatureRef.current) return;
 
       if (commandConsumedForItemRef.current === item.id) {
-        console.log('[VoiceIt] command already consumed for item', item.id);
         return;
       }
       if (pendingNavRef.current) {
-        console.log('[VoiceIt] navigation pending, ignoring');
         return;
       }
 
@@ -1243,7 +1257,6 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       const isNext = ['keep', 'swipe', 'next', 'continue'].includes(lastCmd);
       if (!isTrash && !isNext) return;
 
-      console.log(`[VoiceIt] executing "${lastCmd}" for item ${item.id}`);
       commandConsumedForItemRef.current = item.id;
       pendingNavRef.current = true;
       setVoiceTranscript('');
@@ -1258,7 +1271,6 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       } else {
         // Nothing moved (single item, navigation in progress...): undo the locks so
         // the user can simply say it again
-        console.log('[VoiceIt] command refused, releasing gate');
         releaseVoiceGate();
         lastProcessedTranscriptRef.current = '';
       }
@@ -1288,13 +1300,15 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       if (!wantsListeningRef.current) return;
       if (!(await isEngineIdle())) return;
 
-      console.log(`[VoiceIt] engine stopped (${reason}), restarting`);
       try {
         await startEngineRef.current();
       } catch (error) {
         engineFailuresRef.current += 1;
         if (engineFailuresRef.current >= MAX_ENGINE_FAILURES) {
-          console.warn('[VoiceIt] giving up after repeated engine failures', error);
+          console.warn(
+            '[VoiceIt] giving up after repeated engine failures',
+            error,
+          );
           wantsListeningRef.current = false;
           setIsListening(false);
           return;
@@ -1320,11 +1334,12 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       clearVoiceBuffers();
       releaseVoiceGate();
       setVoiceTranscript('');
-      const description = `${e?.error?.message ?? ''} ${e?.error?.code ?? ''}`.trim();
+      const description = `${e?.error?.message ?? ''} ${
+        e?.error?.code ?? ''
+      }`.trim();
       // Silence, session caps and cancellations are normal; anything else is a failure
-      const isBenign = /no speech|retry|cancel|timeout|\b(216|203|1110)\b/i.test(
-        description,
-      );
+      const isBenign =
+        /no speech|retry|cancel|timeout|\b(216|203|1110)\b/i.test(description);
       if (!isBenign) {
         engineFailuresRef.current += 1;
         console.warn('[VoiceIt] speech error:', description);
@@ -1697,8 +1712,8 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
                 hasScrolledToInitial
                   ? undefined
                   : initialIndex >= 0 && initialIndex < items.length
-                    ? initialIndex
-                    : 0
+                  ? initialIndex
+                  : 0
               }
               getItemLayout={(data, index) => ({
                 length: width,
@@ -1709,7 +1724,9 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
               viewabilityConfig={viewabilityConfig}
               onScrollToIndexFailed={info => {
                 // Fallback: scroll to offset if scrollToIndex fails
-                const wait = new Promise<void>(resolve => setTimeout(resolve, 500));
+                const wait = new Promise<void>(resolve =>
+                  setTimeout(resolve, 500),
+                );
                 wait.then(() => {
                   if (flatListRef.current) {
                     flatListRef.current.scrollToOffset({
@@ -1802,8 +1819,8 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
                           styles.mediaWrapper,
                           isCurrentItem
                             ? {
-                              transform: [{ translateY: translateY }],
-                            }
+                                transform: [{ translateY: translateY }],
+                              }
                             : {},
                         ]}
                       >
@@ -1862,40 +1879,40 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
                             />
                           )
                         ) : // Use React Native Image for ph:// URIs (FastImage doesn't support ph://)
-                          item.uri.startsWith('ph://') ? (
-                            <Image
-                              source={{ uri: item.uri }}
-                              style={styles.media}
-                              resizeMode="contain"
-                              onError={() => {
-                                // Image failed to load
-                              }}
-                              onLoad={() => {
-                                // Image loaded successfully
-                              }}
-                            />
-                          ) : (
-                            <FastImage
-                              source={{
+                        item.uri.startsWith('ph://') ? (
+                          <Image
+                            source={{ uri: item.uri }}
+                            style={styles.media}
+                            resizeMode="contain"
+                            onError={() => {
+                              // Image failed to load
+                            }}
+                            onLoad={() => {
+                              // Image loaded successfully
+                            }}
+                          />
+                        ) : (
+                          <FastImage
+                            source={{
+                              uri: item.uri,
+                              priority: isCurrentItem
+                                ? FastImage.priority.high
+                                : FastImage.priority.low,
+                              cache: FastImage.cacheControl.web,
+                            }}
+                            style={styles.media}
+                            resizeMode={FastImage.resizeMode.contain}
+                            onError={() => {
+                              console.error('[MediaViewer] FastImage ERROR:', {
                                 uri: item.uri,
-                                priority: isCurrentItem
-                                  ? FastImage.priority.high
-                                  : FastImage.priority.low,
-                                cache: FastImage.cacheControl.web,
-                              }}
-                              style={styles.media}
-                              resizeMode={FastImage.resizeMode.contain}
-                              onError={() => {
-                                console.error('[MediaViewer] FastImage ERROR:', {
-                                  uri: item.uri,
-                                  id: item.id,
-                                });
-                              }}
-                              onLoad={() => {
-                                // Image loaded successfully
-                              }}
-                            />
-                          )}
+                                id: item.id,
+                              });
+                            }}
+                            onLoad={() => {
+                              // Image loaded successfully
+                            }}
+                          />
+                        )}
                       </Animated.View>
 
                       {/* Viewed Checkmark Badge - only show on current item */}
@@ -1954,7 +1971,10 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         <View style={styles.controlsOverlay}>
           {/* Top Controls */}
           <View style={styles.topControls}>
-            <TouchableOpacity onPress={handleClosePress} style={styles.closeButton}>
+            <TouchableOpacity
+              onPress={handleClosePress}
+              style={styles.closeButton}
+            >
               <Text style={styles.closeText}>✕</Text>
             </TouchableOpacity>
             <TouchableOpacity
