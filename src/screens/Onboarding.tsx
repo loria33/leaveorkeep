@@ -502,7 +502,7 @@ const Onboarding: React.FC = () => {
   const [currentPhrase, setCurrentPhrase] = useState(
     PHRASES[Math.floor(Math.random() * PHRASES.length)],
   );
-  const phraseIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const phraseIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Theme selection state
   const [selectedTheme, setSelectedTheme] = useState<'pink' | 'blue'>('pink');
@@ -653,7 +653,7 @@ const Onboarding: React.FC = () => {
   const completeOnboarding = async () => {
     setHasPermission(true);
     setOnboardingComplete(true);
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise<void>(r => setTimeout(r, 500));
     scanMedia();
   };
 

@@ -1,7 +1,8 @@
 module.exports = {
-  preset: 'react-native',
+  preset: '@react-native/jest-preset',
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native|@react-native|@react-navigation|react-native-gesture-handler|react-native-google-mobile-ads)/)',
+    // Transform every RN-ecosystem package (they ship untranspiled ESM/TS)
+    "node_modules/(?!(jest-)?react-native|@react-native|@react-navigation|@callstack)",
   ],
   setupFiles: [
     'react-native-gesture-handler/jestSetup',

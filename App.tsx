@@ -50,8 +50,8 @@ const HomeStackNavigator: React.FC = () => {
   return (
     <HomeStack.Navigator screenOptions={{ headerShown: false }}>
       <HomeStack.Screen name="Home" component={Home} />
-      <HomeStack.Screen 
-        name="MonthSelectionScreen" 
+      <HomeStack.Screen
+        name="MonthSelectionScreen"
         component={MonthSelectionScreen}
         options={{
           headerShown: false,
@@ -59,12 +59,12 @@ const HomeStackNavigator: React.FC = () => {
           animation: 'slide_from_right',
         }}
       />
-      <HomeStack.Screen 
-        name="MediaViewerScreen" 
+      <HomeStack.Screen
+        name="MediaViewerScreen"
         component={MediaViewerScreen}
         options={{
           headerShown: false,
-          presentation: 'fullScreenModal',
+          presentation: 'modal',
           animation: 'slide_from_right',
         }}
       />

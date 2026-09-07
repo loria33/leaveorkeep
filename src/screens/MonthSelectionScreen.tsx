@@ -21,9 +21,9 @@ import {
   isLiquidGlassSupported,
 } from '@callstack/liquid-glass';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useMedia, MediaItem } from '../context/MediaContext';
+import { useMedia } from '../context/MediaContext';
 import { MediaViewerScreenParams } from './MediaViewerScreen';
-import { getLastViewedItemId, loadViewedItems } from '../utils/viewedMediaTracker';
+import { resolveResumeStart } from '../utils/resumePosition';
 
 const backgroundImagePink = require('../assets/bg.png');
 const backgroundImageBlue = require('../assets/bg2.jpg');
@@ -49,7 +49,7 @@ const MonthSelectionScreen: React.FC = () => {
   const navigation = useNavigation<MonthSelectionScreenNavigationProp>();
   const route = useRoute<MonthSelectionScreenRouteProp>();
   const { monthKey, monthName } = route.params;
-  
+
   const {
     monthSummaries,
     loadMonthContent,
@@ -59,43 +59,11 @@ const MonthSelectionScreen: React.FC = () => {
   const [skin, setSkin] = useState<'pink' | 'blue'>('blue');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Helper function to get the starting index for a month
-  const getStartingIndex = async (
-    items: MediaItem[],
-    monthKey: string,
-  ): Promise<number> => {
-    if (items.length === 0) return 0;
-
-    try {
-      // First, try to get the last viewed item ID for this month
-      const lastViewedItemId = await getLastViewedItemId(monthKey);
-
-      if (lastViewedItemId) {
-        // Find that item in the current items array
-        const foundIndex = items.findIndex(
-          item => item.id === lastViewedItemId,
-        );
-        if (foundIndex >= 0) {
-          // Resume from where user left off in this month
-          return foundIndex;
-        }
-      }
-
-      // If last viewed item not found in current array, fall back to finding first unviewed item
-      const viewedItems = await loadViewedItems();
-      for (let i = 0; i < items.length; i++) {
-        if (!viewedItems.has(items[i].id)) {
-          return i;
-        }
-      }
-
-      // If all items are viewed, start at the beginning
-      return 0;
-    } catch (error) {
-      // On error, fall back to first index
-      return 0;
-    }
-  };
+  // Eagerly load month content on mount to populate photo/video counts
+  // (monthSummaries start with counts=0 due to lazy loading)
+  useEffect(() => {
+    loadMonthContent(monthKey, 20);
+  }, [monthKey]);
 
   // Find month summary to get counts
   const monthSummary = monthSummaries.find(m => m.monthKey === monthKey);
@@ -149,12 +117,15 @@ const MonthSelectionScreen: React.FC = () => {
 
     try {
       const monthItems = await loadMonthContent(monthKey, 20);
-      const photoItems = monthItems.filter(item => item.type === 'photo');
+      // Resume where the user left off, loading further into the month if needed
+      const { items: photoItems, index: startIndex } = await resolveResumeStart(
+        monthKey,
+        'photos',
+        monthItems,
+        loadMonthContent,
+      );
 
       if (photoItems.length > 0) {
-        // Get starting index (resume from last position or first unviewed)
-        const startIndex = await getStartingIndex(photoItems, monthKey);
-        
         navigation.navigate('MediaViewerScreen', {
           monthKey,
           mediaType: 'photos',
@@ -192,12 +163,15 @@ const MonthSelectionScreen: React.FC = () => {
 
     try {
       const monthItems = await loadMonthContent(monthKey, 20);
-      const videoItems = monthItems.filter(item => item.type === 'video');
+      // Resume where the user left off, loading further into the month if needed
+      const { items: videoItems, index: startIndex } = await resolveResumeStart(
+        monthKey,
+        'videos',
+        monthItems,
+        loadMonthContent,
+      );
 
       if (videoItems.length > 0) {
-        // Get starting index (resume from last position or first unviewed)
-        const startIndex = await getStartingIndex(videoItems, monthKey);
-        
         navigation.navigate('MediaViewerScreen', {
           monthKey,
           mediaType: 'videos',
@@ -232,12 +206,16 @@ const MonthSelectionScreen: React.FC = () => {
     }
 
     try {
-      const monthItems = await loadMonthContent(monthKey, 20);
+      const loadedItems = await loadMonthContent(monthKey, 20);
+      // Resume where the user left off, loading further into the month if needed
+      const { items: monthItems, index: startIndex } = await resolveResumeStart(
+        monthKey,
+        'all',
+        loadedItems,
+        loadMonthContent,
+      );
 
       if (monthItems.length > 0) {
-        // Get starting index (resume from last position or first unviewed)
-        const startIndex = await getStartingIndex(monthItems, monthKey);
-        
         navigation.navigate('MediaViewerScreen', {
           monthKey,
           mediaType: 'all',

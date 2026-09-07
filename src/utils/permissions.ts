@@ -21,7 +21,7 @@ export const MICROPHONE_PERMISSIONS = {
   android: [PERMISSIONS.ANDROID.RECORD_AUDIO],
 };
 
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 export const debugPermissionState = async (): Promise<void> => {
   if (__DEV__) {

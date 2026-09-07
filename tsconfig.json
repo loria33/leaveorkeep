@@ -1,3 +1,10 @@
 {
-  "extends": "@react-native/typescript-config"
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    // RN 0.87 defaults to the Strict TypeScript API. Opt out until
+    // react-native-fast-image / react-native-davoice-tts ship strict-compatible types.
+    "customConditions": ["react-native", "react-native-legacy-deep-imports"]
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["**/node_modules", "**/Pods"]
 }

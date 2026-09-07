@@ -252,7 +252,7 @@ const Home: React.FC = () => {
   const viewedItemsCacheRef = useRef<Set<string> | null>(null);
 
   // Debounce timer for saving progress (avoid blocking UI on every swipe)
-  const saveProgressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const saveProgressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingProgressRef = useRef<{
     [monthKey: string]: {
       viewed: number;
@@ -318,16 +318,6 @@ const Home: React.FC = () => {
     ) {
       (async () => {
         try {
-          // Check completion status
-          const { isMonthCompleted } = await import(
-            '../utils/viewedMediaTracker'
-          );
-          const isCompleted = await isMonthCompleted(viewingMonth);
-          setMonthCompletionStatus(prev => ({
-            ...prev,
-            [viewingMonth]: isCompleted,
-          }));
-
           // Update progress - force immediate save on viewer close
           const stats = await getMonthViewedStats(viewingMonth);
           const started = stats.viewedCount > 0;
@@ -362,6 +352,24 @@ const Home: React.FC = () => {
             })();
             return newProgress;
           });
+
+          // Check completion status after a slight delay to allow MediaViewer
+          // unmount cleanup (which marks completion asynchronously) to finish
+          setTimeout(async () => {
+            try {
+              const { isMonthCompleted } = await import(
+                '../utils/viewedMediaTracker'
+              );
+              const isCompleted = await isMonthCompleted(viewingMonth);
+              setMonthCompletionStatus(prev => ({
+                ...prev,
+                [viewingMonth]: isCompleted,
+              }));
+            } catch (error) {
+              // Error checking delayed completion status
+            }
+          }, 2500);
+
         } catch (error) {
           // Error checking completion status
         }
@@ -492,7 +500,7 @@ const Home: React.FC = () => {
 
   // Load and update month completion status and progress
   // Extract as a reusable function so it can be called from multiple places
-  // MEMORY FIX: Only process first 10 months to prevent memory spike
+  // Completion is a cached lookup and progress comes from storage, so no media is loaded
   const loadMonthStatus = React.useCallback(async () => {
     if (monthSummaries.length === 0) return;
 
@@ -509,58 +517,26 @@ const Home: React.FC = () => {
       };
     } = { ...persistedProgress };
 
-    // MEMORY FIX: Only process first 10 months to prevent loading thousands of items
-    const monthsToProcess = monthSummaries.slice(0, 10);
-
-    for (const summary of monthsToProcess) {
+    // Completion is a cached Set lookup and progress comes from storage, so every
+    // month can be processed without loading any media
+    const { isMonthCompleted } = await import('../utils/viewedMediaTracker');
+    for (const summary of monthSummaries) {
       try {
-        // Check completion status
-        const { isMonthCompleted } = await import(
-          '../utils/viewedMediaTracker'
-        );
         status[summary.monthKey] = await isMonthCompleted(summary.monthKey);
-
-        // Use persisted progress if available, otherwise initialize with summary data
-        const existingProgress = persistedProgress[summary.monthKey];
-        if (existingProgress) {
-          // Use persisted data - it's already loaded from storage
-          progress[summary.monthKey] = existingProgress;
-        } else {
-          // No persisted data - initialize with summary data
-          const totalCount = summary.totalCount || 0;
-          progress[summary.monthKey] = {
-            viewed: 0,
-            total: totalCount,
-            remaining: totalCount,
-            started: false,
-          };
-        }
-      } catch (error) {
-        // On error, still check completion status but use defaults for progress
-        try {
-          const { isMonthCompleted } = await import(
-            '../utils/viewedMediaTracker'
-          );
-          status[summary.monthKey] = await isMonthCompleted(summary.monthKey);
-        } catch (e) {
-          status[summary.monthKey] = false;
-        }
-        // Use persisted progress if available, otherwise use defaults
-        const existingProgress = persistedProgress[summary.monthKey];
-        if (existingProgress) {
-          progress[summary.monthKey] = existingProgress;
-        } else {
-          progress[summary.monthKey] = {
-            viewed: 0,
-            total: summary.totalCount || 0,
-            remaining: summary.totalCount || 0,
-            started: false,
-          };
-        }
+      } catch (e) {
+        status[summary.monthKey] = false;
       }
 
-      // MEMORY FIX: Add small delay between months to prevent memory spike
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // No persisted progress yet: initialize from the summary
+      if (!persistedProgress[summary.monthKey]) {
+        const totalCount = summary.totalCount || 0;
+        progress[summary.monthKey] = {
+          viewed: 0,
+          total: totalCount,
+          remaining: totalCount,
+          started: false,
+        };
+      }
     }
     // Use functional update to ensure state is set even if component re-renders
     // Force update by creating new objects to ensure React detects the change
@@ -590,7 +566,7 @@ const Home: React.FC = () => {
       // Always return a new value to ensure React detects the change
       return Date.now();
     });
-  }, [monthSummaries, getMonthViewedStats]);
+  }, [monthSummaries]);
 
   // Track when Home screen is focused and reload preferences
   useFocusEffect(
@@ -599,8 +575,8 @@ const Home: React.FC = () => {
       // Reload preferences when screen comes into focus (in case they were changed in About tab)
       loadHidePreferences();
       loadSkinPreference();
-      // Also reload month status on focus to ensure checkmarks show up, especially when liquidglass is not available
-      // Reset statusLoaded to 0 first to ensure re-render happens
+      // Progress and completion are persisted before the viewer navigates back,
+      // so they can be read right away
       setStatusLoaded(0);
       loadMonthStatus();
       return () => {
@@ -877,7 +853,7 @@ const Home: React.FC = () => {
     }
   };
 
-  const handleViewProgress = async (viewedCount: number) => {
+  const handleViewProgress = async (viewedCount: number, _totalCount?: number) => {
     if (
       currentViewingMonth &&
       !currentViewingMonth.startsWith('TIME_FILTER_') &&
@@ -1357,8 +1333,8 @@ const Home: React.FC = () => {
                               {hideTimeFilters
                                 ? '👁️'
                                 : isSmallScreen
-                                ? '🚫'
-                                : 'Hide'}
+                                  ? '🚫'
+                                  : 'Hide'}
                             </Text>
                           </TouchableOpacity>
                         </View>
@@ -1504,7 +1480,7 @@ const Home: React.FC = () => {
                   style={[
                     styles.monthFilterCard,
                     monthFilter === 'needToFinish' &&
-                      styles.monthFilterCardActive,
+                    styles.monthFilterCardActive,
                   ]}
                   onPress={() => setMonthFilter('needToFinish')}
                   activeOpacity={0.7}
@@ -1513,7 +1489,7 @@ const Home: React.FC = () => {
                     style={[
                       styles.monthFilterCardText,
                       monthFilter === 'needToFinish' &&
-                        styles.monthFilterCardTextActive,
+                      styles.monthFilterCardTextActive,
                       skin === 'blue' && { color: '#ffffff' },
                     ]}
                   >
@@ -1525,7 +1501,7 @@ const Home: React.FC = () => {
                   style={[
                     styles.monthFilterCard,
                     monthFilter === 'notStarted' &&
-                      styles.monthFilterCardActive,
+                    styles.monthFilterCardActive,
                   ]}
                   onPress={() => setMonthFilter('notStarted')}
                   activeOpacity={0.7}
@@ -1534,7 +1510,7 @@ const Home: React.FC = () => {
                     style={[
                       styles.monthFilterCardText,
                       monthFilter === 'notStarted' &&
-                        styles.monthFilterCardTextActive,
+                      styles.monthFilterCardTextActive,
                       skin === 'blue' && { color: '#ffffff' },
                     ]}
                   >
@@ -1576,8 +1552,8 @@ const Home: React.FC = () => {
                     !isLiquidGlassSupported && skin === 'pink'
                       ? gradientPalette.frostyBlue
                       : !isLiquidGlassSupported && skin === 'blue'
-                      ? gradientPalette.frostyPink
-                      : monthGradients[originalIndex % monthGradients.length];
+                        ? gradientPalette.frostyPink
+                        : monthGradients[originalIndex % monthGradients.length];
                   const isCompleted = monthCompletionStatus[summary.monthKey];
                   const progress = monthViewingProgress[summary.monthKey];
                   const showProgress =
@@ -1620,7 +1596,7 @@ const Home: React.FC = () => {
                                       style={[
                                         styles.progressBadge,
                                         skin === 'pink' &&
-                                          styles.progressBadgePink,
+                                        styles.progressBadgePink,
                                       ]}
                                     >
                                       {progress.remaining} left
@@ -1674,7 +1650,7 @@ const Home: React.FC = () => {
                                       style={[
                                         styles.progressBadge,
                                         skin === 'pink' &&
-                                          styles.progressBadgePink,
+                                        styles.progressBadgePink,
                                       ]}
                                     >
                                       {progress.remaining} left

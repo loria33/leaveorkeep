@@ -20,7 +20,7 @@ let viewedItemsCache: Set<string> | null = null;
 let completedMonthsCache: Set<string> | null = null;
 
 // Debounce timer for batched writes
-let saveTimer: NodeJS.Timeout | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
 const SAVE_DEBOUNCE_MS = 2000; // Save 2 seconds after last update
 
 /**
@@ -80,8 +80,9 @@ export const isItemViewed = async (itemId: string): Promise<boolean> => {
 /**
  * Mark a media item as viewed
  * Uses debounced batching for efficient storage writes
+ * Resolves true when the item was not viewed before
  */
-export const markItemAsViewed = async (itemId: string): Promise<void> => {
+export const markItemAsViewed = async (itemId: string): Promise<boolean> => {
   const viewedItems = await loadViewedItems();
   
   // Only add if not already viewed (avoid unnecessary writes)
@@ -104,7 +105,9 @@ export const markItemAsViewed = async (itemId: string): Promise<void> => {
       }
       saveTimer = null;
     }, SAVE_DEBOUNCE_MS);
+    return true;
   }
+  return false;
 };
 
 /**
@@ -179,6 +182,24 @@ export const markMonthAsCompleted = async (monthKey: string): Promise<void> => {
   if (!completedMonths.has(monthKey)) {
     completedMonths.add(monthKey);
     
+    try {
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.COMPLETED_MONTHS,
+        JSON.stringify(Array.from(completedMonths)),
+      );
+    } catch (error) {
+      // Error saving completed months
+    }
+  }
+};
+
+/**
+ * Remove a month's completed flag (e.g. new media arrived in a completed month)
+ */
+export const unmarkMonthAsCompleted = async (monthKey: string): Promise<void> => {
+  const completedMonths = await loadCompletedMonths();
+
+  if (completedMonths.delete(monthKey)) {
     try {
       await AsyncStorage.setItem(
         STORAGE_KEYS.COMPLETED_MONTHS,
@@ -366,4 +387,3 @@ export const getLastViewedItemId = async (
   
   return null;
 };
-

@@ -24,17 +24,8 @@ const MonthThumbnail: React.FC<MonthThumbnailProps> = ({
   items,
   onPress,
 }) => {
-  const { selectedSources } = useMedia();
   const [imageError, setImageError] = React.useState(false);
   const [imageLoaded, setImageLoaded] = React.useState(false);
-
-  // Filter items based on selected sources
-  const filteredItems = React.useMemo(() => {
-    if (selectedSources.includes('All')) {
-      return items;
-    }
-    return items.filter(item => selectedSources.includes(item.source));
-  }, [items, selectedSources]);
 
   const monthName = React.useMemo(() => {
     const [year, month] = monthKey.split('-');
@@ -42,7 +33,7 @@ const MonthThumbnail: React.FC<MonthThumbnailProps> = ({
     return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   }, [monthKey]);
 
-  const thumbnailItem = filteredItems[0];
+  const thumbnailItem = items[0];
 
   // Reset state when thumbnail item changes
   React.useEffect(() => {
@@ -50,7 +41,7 @@ const MonthThumbnail: React.FC<MonthThumbnailProps> = ({
     setImageLoaded(false);
   }, [thumbnailItem?.uri]);
 
-  if (!thumbnailItem || filteredItems.length === 0) {
+  if (!thumbnailItem || items.length === 0) {
     return null;
   }
 
@@ -66,7 +57,7 @@ const MonthThumbnail: React.FC<MonthThumbnailProps> = ({
   return (
     <TouchableOpacity
       style={styles.container}
-      onPress={() => onPress(monthKey, filteredItems)}
+      onPress={() => onPress(monthKey, items)}
     >
       {/* Try FastImage first, fallback to regular Image if it fails */}
       {!imageError ? (
@@ -114,29 +105,29 @@ const MonthThumbnail: React.FC<MonthThumbnailProps> = ({
       >
         <View style={styles.monthBannerContent}>
           <Text style={styles.monthText}>{monthName}</Text>
-          <Text style={styles.countText}>{filteredItems.length} items</Text>
+          <Text style={styles.countText}>{items.length} items</Text>
         </View>
       </LinearGradient>
 
       {/* Source indicators with enhanced styling */}
       <View style={styles.sourcesContainer}>
-        {Array.from(new Set(filteredItems.map(item => item.source)))
+        {Array.from(new Set(items.map(item => item.source)))
           .slice(0, 3)
           .map(source => (
             <View key={source} style={styles.sourceTag}>
               <Text style={styles.sourceText}>{source}</Text>
             </View>
           ))}
-        {Array.from(new Set(filteredItems.map(item => item.source))).length >
+        {Array.from(new Set(items.map(item => item.source))).length >
           3 && (
-          <View style={styles.sourceTag}>
-            <Text style={styles.sourceText}>
-              +
-              {Array.from(new Set(filteredItems.map(item => item.source)))
-                .length - 3}
-            </Text>
-          </View>
-        )}
+            <View style={styles.sourceTag}>
+              <Text style={styles.sourceText}>
+                +
+                {Array.from(new Set(items.map(item => item.source)))
+                  .length - 3}
+              </Text>
+            </View>
+          )}
       </View>
     </TouchableOpacity>
   );

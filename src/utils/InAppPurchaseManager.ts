@@ -140,7 +140,7 @@ class InAppPurchaseManager {
       }
 
       // Check if product exists (handle both iOS and Android product types)
-      // In react-native-iap v14, Product type uses 'id' field, not 'productId'
+      // Since react-native-iap v14, Product type uses 'id' field, not 'productId'
       const product = products.find(p => {
         // Try multiple possible field names for product ID
         const productId =
@@ -154,8 +154,8 @@ class InAppPurchaseManager {
         throw new Error('Premium product not found. Please try again later.');
       }
 
-      // Request purchase with proper configuration for react-native-iap v14
-      // The API expects { request: { ios: { sku } } or { android: { skus: [] } } }
+      // Request purchase with proper configuration for react-native-iap v16
+      // The API expects { request: { apple: { sku } } or { google: { skus: [] } } }
       const productId = this.REMOVE_ADS_PRODUCT_ID;
       if (!productId) {
         throw new Error('Product ID is not configured.');
@@ -164,7 +164,7 @@ class InAppPurchaseManager {
       if (Platform.OS === 'ios') {
         await requestPurchase({
           request: {
-            ios: { sku: productId },
+            apple: { sku: productId },
           },
           type: 'in-app',
         });
@@ -172,7 +172,7 @@ class InAppPurchaseManager {
         // Android
         await requestPurchase({
           request: {
-            android: { skus: [productId] },
+            google: { skus: [productId] },
           },
           type: 'in-app',
         });

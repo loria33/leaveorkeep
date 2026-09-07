@@ -22,13 +22,12 @@ import {
   markItemsAsViewed,
   isItemViewed,
   isMonthCompleted,
-  checkMonthCompletion,
-  getViewedCount,
-  getViewedPercentage,
   loadViewedItems,
   loadCompletedMonths,
   saveViewedItemsImmediately,
   getViewingStats,
+  markMonthAsCompleted,
+  unmarkMonthAsCompleted,
 } from '../utils/viewedMediaTracker';
 
 export interface MediaItem {
@@ -136,10 +135,18 @@ export interface MediaContextType {
   };
 
   // Viewed media tracking methods
-  markMediaItemAsViewed: (itemId: string) => Promise<void>;
+  /** Resolves true when the item had not been viewed before */
+  markMediaItemAsViewed: (itemId: string) => Promise<boolean>;
   markMediaItemsAsViewed: (itemIds: string[]) => Promise<void>;
   isMediaItemViewed: (itemId: string) => Promise<boolean>;
-  getMonthViewedStats: (monthKey: string) => Promise<{
+  /**
+   * Scans the whole month and reconciles its completed flag. `viewedIds` lets the
+   * caller count against a snapshot of the viewed set instead of the live cache.
+   */
+  getMonthViewedStats: (
+    monthKey: string,
+    viewedIds?: Set<string>,
+  ) => Promise<{
     viewedCount: number;
     totalCount: number;
     percentage: number;
@@ -676,7 +683,9 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
           return {
             ...prev,
             [monthKey]: {
-              ...current,
+              items: current.items,
+              hasMore: current.hasMore,
+              nextOffset: current.nextOffset,
               isLoading: false,
             },
           };
@@ -692,7 +701,7 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
           ...prev,
           [monthKey]: {
             items: limitedItems,
-            hasMore: hasMore && limitedItems.length < MAX_ITEMS_PER_MONTH,
+            hasMore: !!(hasMore && limitedItems.length < MAX_ITEMS_PER_MONTH),
             nextOffset: limitedItems.length,
             isLoading: false,
           },
@@ -707,7 +716,9 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
           return {
             ...prev,
             [monthKey]: {
-              ...current,
+              items: current.items,
+              hasMore: current.hasMore,
+              nextOffset: current.nextOffset,
               isLoading: false,
             },
           };
@@ -1024,8 +1035,8 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   };
 
   // Viewed media tracking methods
-  const markMediaItemAsViewedMethod = async (itemId: string) => {
-    await markItemAsViewed(itemId);
+  const markMediaItemAsViewedMethod = async (itemId: string): Promise<boolean> => {
+    return markItemAsViewed(itemId);
   };
 
   const markMediaItemsAsViewedMethod = async (itemIds: string[]) => {
@@ -1036,128 +1047,93 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     return await isItemViewed(itemId);
   };
 
+  // Scan a whole month natively (metadata only, in batches) and count viewed items.
+  // Returns null when the native module is unavailable.
+  const scanMonthViewedCounts = async (
+    monthKey: string,
+    viewedIds?: Set<string>,
+  ): Promise<{ viewedCount: number; totalCount: number } | null> => {
+    const viewed = viewedIds ?? (await loadViewedItems());
+    const { fetchMonthPhotosNative } = await import('../native/PhotoMonths');
+    const BATCH_SIZE = 200;
+    let offset = 0;
+    let totalCount = 0;
+    let viewedCount = 0;
+
+    while (true) {
+      const batch = await fetchMonthPhotosNative(monthKey, offset, BATCH_SIZE);
+      if (batch === null) {
+        return offset === 0 ? null : { viewedCount, totalCount };
+      }
+      for (const item of batch) {
+        totalCount += 1;
+        if (viewed.has(item.id)) viewedCount += 1;
+      }
+      if (batch.length < BATCH_SIZE) break;
+      offset += batch.length;
+    }
+
+    return { viewedCount, totalCount };
+  };
+
+  // Persist a completion verdict and keep the in-memory set in sync, in both
+  // directions, so a month that gains new media loses its checkmark until it is seen.
+  const reconcileMonthCompletion = async (
+    monthKey: string,
+    isCompleted: boolean,
+  ) => {
+    const wasCompleted = await isMonthCompleted(monthKey);
+    if (isCompleted && !wasCompleted) {
+      await markMonthAsCompleted(monthKey);
+      setCompletedMonths(prev => new Set(prev).add(monthKey));
+    } else if (!isCompleted && wasCompleted) {
+      await unmarkMonthAsCompleted(monthKey);
+      setCompletedMonths(prev => {
+        const next = new Set(prev);
+        next.delete(monthKey);
+        return next;
+      });
+    }
+  };
+
   const getMonthViewedStatsMethod = async (
     monthKey: string,
+    viewedIds?: Set<string>,
   ): Promise<{
     viewedCount: number;
     totalCount: number;
     percentage: number;
     isCompleted: boolean;
   }> => {
-    // Get total count from month summary (persistent, not dependent on loaded items)
-    const summary = monthSummaries.find(m => m.monthKey === monthKey);
-    const totalCountFromSummary = summary?.totalCount || 0;
+    let counts = await scanMonthViewedCounts(monthKey, viewedIds);
 
-    // MEMORY FIX: Use loaded items if available, otherwise use summary count
-    // Don't load all photos just to count viewed items
-    const loadedItems = getMonthItems(monthKey);
-    let viewedCount = 0;
-    let processedCount = 0;
-
-    if (loadedItems.length > 0) {
-      // Use already loaded items
-      viewedCount = await getViewedCount(loadedItems);
-      processedCount = loadedItems.length;
-    } else {
-      // MEMORY OPTIMIZATION: Only load small batch if we really need to count
-      // Don't load 2000 items just for stats
-      const batchSize = 50; // Much smaller batch
-      const maxItemsToProcess = 200; // Reduced from 2000 to 200
-
-      try {
-        const { fetchMonthPhotosNative } = await import(
-          '../native/PhotoMonths'
-        );
-        const batch = await fetchMonthPhotosNative(monthKey, 0, batchSize);
-        if (batch && batch.length > 0) {
-          // Process batch and count viewed items
-          viewedCount = await getViewedCount(batch);
-          processedCount = batch.length;
-        }
-      } catch (error) {
-        // Error loading batch for stats
-      }
+    if (!counts) {
+      // Native module unavailable: count what is loaded against the summary total
+      const loadedItems = getMonthItems(monthKey);
+      const viewed = viewedIds ?? (await loadViewedItems());
+      const summary = monthSummaries.find(m => m.monthKey === monthKey);
+      counts = {
+        viewedCount: loadedItems.filter(item => viewed.has(item.id)).length,
+        totalCount: summary?.totalCount || loadedItems.length,
+      };
     }
 
-    // Use summary totalCount if available, otherwise use processed count
-    const totalCount =
-      totalCountFromSummary > 0 ? totalCountFromSummary : processedCount;
-
-    // Calculate percentage
+    const { viewedCount, totalCount } = counts;
     const percentage =
       totalCount > 0 ? Math.round((viewedCount / totalCount) * 100) : 0;
-    const isCompleted = await isMonthCompleted(monthKey);
+    const isCompleted = totalCount > 0 && viewedCount >= totalCount;
+    await reconcileMonthCompletion(monthKey, isCompleted);
 
-    return {
-      viewedCount,
-      totalCount,
-      percentage,
-      isCompleted,
-    };
+    return { viewedCount, totalCount, percentage, isCompleted };
   };
 
   const checkAndMarkMonthCompletedMethod = async (
     monthKey: string,
   ): Promise<boolean> => {
     try {
-      // MEMORY OPTIMIZATION: Process items in batches without accumulating all in memory
-      // Use native module to get items in batches
-      const { fetchMonthPhotosNative } = await import('../native/PhotoMonths');
-
-      let totalViewed = 0;
-      let totalCount = 0;
-      let offset = 0;
-      const batchSize = 50; // MEMORY FIX: Reduced from 200 to 50 to prevent loading all items
-      const maxItemsToProcess = 200; // MEMORY FIX: Reduced from 2000 to 200
-      let hasMore = true;
-
-      // Get total count from summary first
-      const summary = monthSummaries.find(m => m.monthKey === monthKey);
-      const expectedTotal = summary?.totalCount || 0;
-
-      while (hasMore && totalCount < maxItemsToProcess) {
-        const batch = await fetchMonthPhotosNative(monthKey, offset, batchSize);
-
-        if (batch && batch.length > 0) {
-          // Check viewed status for this batch without accumulating
-          const batchViewed = await getViewedCount(batch);
-          totalViewed += batchViewed;
-          totalCount += batch.length;
-
-          // Release batch from memory
-          offset += batch.length;
-          hasMore = batch.length === batchSize;
-
-          // Early exit if we've checked enough items
-          if (expectedTotal > 0 && totalCount >= expectedTotal) {
-            break;
-          }
-        } else {
-          hasMore = false;
-        }
-      }
-
-      // Use expected total if available, otherwise use processed count
-      const finalTotal = expectedTotal > 0 ? expectedTotal : totalCount;
-
-      // Check if all items are viewed
-      const isCompleted = finalTotal > 0 && totalViewed >= finalTotal;
-
-      if (isCompleted) {
-        setCompletedMonths(prev => new Set(prev).add(monthKey));
-      }
-
-      return isCompleted;
+      const stats = await getMonthViewedStatsMethod(monthKey);
+      return stats.isCompleted;
     } catch (error) {
-      // Fallback to loaded items if native module fails
-      const monthItems = getMonthItems(monthKey);
-      if (monthItems.length > 0) {
-        const isCompleted = await checkMonthCompletion(monthKey, monthItems);
-        if (isCompleted) {
-          setCompletedMonths(prev => new Set(prev).add(monthKey));
-        }
-        return isCompleted;
-      }
       return false;
     }
   };

@@ -1,11 +1,11 @@
 buildscript {
     ext {
-        buildToolsVersion = "35.0.0"
+        buildToolsVersion = "37.0.0"
         minSdkVersion = 33
-        compileSdkVersion = 35
-        targetSdkVersion = 35
+        compileSdkVersion = 37
+        targetSdkVersion = 36
         ndkVersion = "27.1.12297006"
-        kotlinVersion = "2.1.20"
+        kotlinVersion = "2.2.0"
     }
     repositories {
         google()
@@ -19,3 +19,19 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+// react-native-davoice-tts pins compileSdk 33, which AGP 9 rejects because
+// react-android 0.87 requires 34+. Align it with the app's compileSdk.
+subprojects { subproject ->
+    if (subproject.name == 'react-native-davoice-tts') {
+        subproject.afterEvaluate {
+            subproject.android {
+                compileSdkVersion rootProject.ext.compileSdkVersion
+                buildToolsVersion rootProject.ext.buildToolsVersion
+                // The library references consumer-rules.pro but does not ship it;
+                // AGP 9 fails on a missing consumer ProGuard file.
+                defaultConfig.consumerProguardFiles.clear()
+            }
+        }
+    }
+}

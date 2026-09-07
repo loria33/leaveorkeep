@@ -125,30 +125,8 @@ class BannerAdManager {
   /**
    * Create a banner ad component
    */
-  public createBannerAd(): JSX.Element {
-    return (
-      <BannerAd
-        unitId={this.AD_UNIT_ID}
-        size={BannerAdSize.BANNER}
-        requestOptions={{
-          requestNonPersonalizedAdsOnly: false,
-        }}
-        onAdLoaded={() => {
-          // Banner ad loaded successfully
-        }}
-        onAdFailedToLoad={error => {
-          // Banner ad failed to load
-          this.isAdCurrentlyShowing = false;
-        }}
-        onAdOpened={() => {
-          // Banner ad opened
-        }}
-        onAdClosed={() => {
-          // Banner ad closed
-          this.isAdCurrentlyShowing = false;
-        }}
-      />
-    );
+  public createBannerAd(): any {
+    throw new Error('Use BannerAdComponent to render banner ads instead of calling manager directly.');
   }
 
   /**
