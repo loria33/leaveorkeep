@@ -1,5 +1,6 @@
 #import "PhotoMonths.h"
 #import <Photos/Photos.h>
+#import <UIKit/UIKit.h>
 
 @implementation PhotoMonths
 
@@ -301,4 +302,208 @@ RCT_REMAP_METHOD(fetchMonthCount,
   resolve(counts);
 }
 
-@end 
+#pragma mark - Shared helpers
+
+// Start and end of the month named by "YYYY-MM" in the current calendar.
+static BOOL MonthDateRange(NSString *monthKey, NSDate **startDate, NSDate **endDate)
+{
+  NSArray *parts = [monthKey componentsSeparatedByString:@"-"];
+  if (parts.count != 2) return NO;
+
+  NSInteger year = [parts[0] integerValue];
+  NSInteger month = [parts[1] integerValue];
+  NSCalendar *cal = [NSCalendar currentCalendar];
+
+  NSDateComponents *startComponents = [[NSDateComponents alloc] init];
+  startComponents.year = year;
+  startComponents.month = month;
+  startComponents.day = 1;
+
+  NSDateComponents *endComponents = [[NSDateComponents alloc] init];
+  endComponents.year = year;
+  endComponents.month = month + 1;
+  endComponents.day = 1;
+
+  *startDate = [cal dateFromComponents:startComponents];
+  *endDate = [cal dateFromComponents:endComponents];
+  return *startDate != nil && *endDate != nil;
+}
+
+// Bytes the asset occupies across all of its resources (original, edits, paired video).
+// PhotoKit exposes this only through KVC, so treat 0 as "unknown".
+static unsigned long long FileSizeForAsset(PHAsset *asset)
+{
+  @try {
+    NSArray<PHAssetResource *> *resources = [PHAssetResource assetResourcesForAsset:asset];
+    unsigned long long total = 0;
+    for (PHAssetResource *resource in resources) {
+      id size = [resource valueForKey:@"fileSize"];
+      if ([size isKindOfClass:[NSNumber class]]) {
+        total += [size unsignedLongLongValue];
+      }
+    }
+    return total;
+  } @catch (NSException *exception) {
+    return 0;
+  }
+}
+
+#pragma mark - Biggest wins first
+
+// Bucket 0: videos, 1: screenshots, 3: everything else. `proxy` orders within a bucket
+// (largest first) from metadata alone, so ranking a month never touches the file system.
+static NSInteger JunkBucketForAsset(PHAsset *asset, NSString **reason, double *proxy)
+{
+  double pixels = (double)asset.pixelWidth * (double)asset.pixelHeight;
+  if (asset.mediaType == PHAssetMediaTypeVideo) {
+    *reason = @"Video";
+    *proxy = pixels * MAX(asset.duration, 1.0);
+    return 0;
+  }
+  if (asset.mediaSubtypes & PHAssetMediaSubtypePhotoScreenshot) {
+    *reason = @"Screenshot";
+    *proxy = pixels;
+    return 1;
+  }
+  *reason = @"Photo";
+  *proxy = pixels;
+  return 3;
+}
+
+RCT_REMAP_METHOD(fetchMonthPhotosRanked,
+                 rankedMonthKey:(NSString *)monthKey
+                 rankedOffset:(nonnull NSNumber *)offset
+                 rankedLimit:(nonnull NSNumber *)limit
+                 rankedResolver:(RCTPromiseResolveBlock)resolve
+                 rankedRejecter:(RCTPromiseRejectBlock)reject)
+{
+  NSDate *startDate = nil;
+  NSDate *endDate = nil;
+  if (!MonthDateRange(monthKey, &startDate, &endDate)) {
+    reject(@"ERR_INVALID_MONTH", @"Invalid month key format", nil);
+    return;
+  }
+
+  PHFetchOptions *assetOptions = [[PHFetchOptions alloc] init];
+  assetOptions.predicate = [NSPredicate predicateWithFormat:@"creationDate >= %@ AND creationDate < %@", startDate, endDate];
+  assetOptions.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:@"creationDate" ascending:NO]];
+  PHFetchResult<PHAsset *> *monthAssets = [PHAsset fetchAssetsWithOptions:assetOptions];
+
+  NSMutableArray<NSDictionary *> *ranked = [NSMutableArray arrayWithCapacity:monthAssets.count];
+  for (PHAsset *asset in monthAssets) {
+    if (!asset.creationDate) continue;
+    NSString *reason = @"Photo";
+    double proxy = 0;
+    NSInteger bucket = JunkBucketForAsset(asset, &reason, &proxy);
+    [ranked addObject:@{
+      @"asset": asset,
+      @"bucket": @(bucket),
+      @"proxy": @(proxy),
+      @"reason": reason
+    }];
+  }
+
+  [ranked sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+    NSInteger bucketA = [a[@"bucket"] integerValue];
+    NSInteger bucketB = [b[@"bucket"] integerValue];
+    if (bucketA != bucketB) {
+      return bucketA < bucketB ? NSOrderedAscending : NSOrderedDescending;
+    }
+    double proxyA = [a[@"proxy"] doubleValue];
+    double proxyB = [b[@"proxy"] doubleValue];
+    if (proxyA != proxyB) {
+      return proxyA > proxyB ? NSOrderedAscending : NSOrderedDescending;
+    }
+    return NSOrderedSame;
+  }];
+
+  NSInteger count = (NSInteger)ranked.count;
+  NSInteger from = MAX(0, MIN(count, [offset integerValue]));
+  NSInteger to = MIN(count, from + MAX(0, [limit integerValue]));
+
+  NSMutableArray *results = [NSMutableArray arrayWithCapacity:MAX(0, to - from)];
+  for (NSInteger i = from; i < to; i++) {
+    NSDictionary *entry = ranked[i];
+    PHAsset *asset = entry[@"asset"];
+    NSString *assetURI = [NSString stringWithFormat:@"ph://%@", asset.localIdentifier];
+    [results addObject:@{
+      @"id": asset.localIdentifier,
+      @"uri": assetURI,
+      @"type": asset.mediaType == PHAssetMediaTypeVideo ? @"video" : @"photo",
+      @"timestamp": @([asset.creationDate timeIntervalSince1970] * 1000),
+      @"source": @"Gallery",
+      @"filename": [NSString stringWithFormat:@"photo_%@", asset.localIdentifier],
+      @"size": @(FileSizeForAsset(asset)),
+      @"junkReason": entry[@"reason"],
+      @"junkRank": entry[@"bucket"]
+    }];
+  }
+
+  NSLog(@"[PhotoMonths] fetchMonthPhotosRanked: %ld assets ranked, returning %lu", (long)count, (unsigned long)results.count);
+  resolve(results);
+}
+
+#pragma mark - Ghost Album
+
+// Writes a small JPEG of the asset to destPath and reports the original's size, so a
+// faded memory of a photo survives its deletion.
+RCT_REMAP_METHOD(saveGhostThumbnail,
+                 ghostUri:(NSString *)uri
+                 ghostDestPath:(NSString *)destPath
+                 ghostMaxSize:(nonnull NSNumber *)maxSize
+                 ghostResolver:(RCTPromiseResolveBlock)resolve
+                 ghostRejecter:(RCTPromiseRejectBlock)reject)
+{
+  NSString *localId = [uri stringByReplacingOccurrencesOfString:@"ph://" withString:@""];
+  PHFetchResult<PHAsset *> *fetched = [PHAsset fetchAssetsWithLocalIdentifiers:@[localId] options:nil];
+  PHAsset *asset = fetched.firstObject;
+  if (!asset) {
+    reject(@"ERR_GHOST_NOT_FOUND", @"Asset not found", nil);
+    return;
+  }
+
+  CGFloat side = MAX(64.0, MIN(1024.0, [maxSize doubleValue]));
+  PHImageRequestOptions *options = [[PHImageRequestOptions alloc] init];
+  options.synchronous = YES;
+  options.networkAccessAllowed = YES;
+  options.resizeMode = PHImageRequestOptionsResizeModeFast;
+  options.deliveryMode = PHImageRequestOptionsDeliveryModeHighQualityFormat;
+
+  __block UIImage *thumbnail = nil;
+  [[PHImageManager defaultManager] requestImageForAsset:asset
+                                             targetSize:CGSizeMake(side, side)
+                                            contentMode:PHImageContentModeAspectFit
+                                                options:options
+                                          resultHandler:^(UIImage *result, NSDictionary *info) {
+    thumbnail = result;
+  }];
+
+  if (!thumbnail) {
+    reject(@"ERR_GHOST_THUMBNAIL", @"Could not render thumbnail", nil);
+    return;
+  }
+
+  NSData *jpeg = UIImageJPEGRepresentation(thumbnail, 0.7);
+  if (!jpeg) {
+    reject(@"ERR_GHOST_THUMBNAIL", @"Could not encode thumbnail", nil);
+    return;
+  }
+
+  [[NSFileManager defaultManager] createDirectoryAtPath:[destPath stringByDeletingLastPathComponent]
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
+  if (![jpeg writeToFile:destPath atomically:YES]) {
+    reject(@"ERR_GHOST_WRITE", @"Could not write thumbnail", nil);
+    return;
+  }
+
+  resolve(@{
+    @"path": destPath,
+    @"width": @(thumbnail.size.width * thumbnail.scale),
+    @"height": @(thumbnail.size.height * thumbnail.scale),
+    @"size": @(FileSizeForAsset(asset))
+  });
+}
+
+@end

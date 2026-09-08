@@ -19,6 +19,7 @@ import InAppPurchaseManager from './src/utils/InAppPurchaseManager';
 import Onboarding from './src/screens/Onboarding';
 import Home from './src/screens/Home';
 import Trash from './src/screens/Trash';
+import GhostAlbum from './src/screens/GhostAlbum';
 import About from './src/screens/About';
 import MediaViewerScreen, { MediaViewerScreenParams } from './src/screens/MediaViewerScreen';
 import MonthSelectionScreen, { MonthSelectionScreenParams } from './src/screens/MonthSelectionScreen';
@@ -41,9 +42,15 @@ type HomeStackParamList = {
   MediaViewerScreen: MediaViewerScreenParams;
 };
 
+type TrashStackParamList = {
+  Trash: undefined;
+  GhostAlbum: undefined;
+};
+
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const HomeStack = createStackNavigator<HomeStackParamList>();
+const TrashStack = createStackNavigator<TrashStackParamList>();
 
 // Home Stack Navigator (nested inside Home tab)
 const HomeStackNavigator: React.FC = () => {
@@ -69,6 +76,24 @@ const HomeStackNavigator: React.FC = () => {
         }}
       />
     </HomeStack.Navigator>
+  );
+};
+
+// Trash Stack Navigator (Trash plus its Ghost Album)
+const TrashStackNavigator: React.FC = () => {
+  return (
+    <TrashStack.Navigator screenOptions={{ headerShown: false }}>
+      <TrashStack.Screen name="Trash" component={Trash} />
+      <TrashStack.Screen
+        name="GhostAlbum"
+        component={GhostAlbum}
+        options={{
+          headerShown: false,
+          presentation: 'card',
+          animation: 'slide_from_right',
+        }}
+      />
+    </TrashStack.Navigator>
   );
 };
 
@@ -121,7 +146,7 @@ const MainTabs: React.FC = () => {
       />
       <Tab.Screen
         name="Trash"
-        component={Trash}
+        component={TrashStackNavigator}
         options={{
           tabBarLabel: 'Trash',
           tabBarIcon: ({ color, size }) => (

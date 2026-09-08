@@ -46,6 +46,12 @@ import {
   getLastViewedItemId,
 } from '../utils/viewedMediaTracker';
 
+const MONTH_FILTER_OPTIONS = [
+  { key: 'all', label: 'Show all' },
+  { key: 'needToFinish', label: 'Need to finish' },
+  { key: 'notStarted', label: 'Not started' },
+] as const;
+
 const backgroundImagePink = require('../assets/bg.png');
 const backgroundImageBlue = require('../assets/bg2.jpg');
 const keepFlickIcon = require('../assets/kf.png');
@@ -252,7 +258,9 @@ const Home: React.FC = () => {
   const viewedItemsCacheRef = useRef<Set<string> | null>(null);
 
   // Debounce timer for saving progress (avoid blocking UI on every swipe)
-  const saveProgressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveProgressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const pendingProgressRef = useRef<{
     [monthKey: string]: {
       viewed: number;
@@ -369,7 +377,6 @@ const Home: React.FC = () => {
               // Error checking delayed completion status
             }
           }, 2500);
-
         } catch (error) {
           // Error checking completion status
         }
@@ -853,7 +860,10 @@ const Home: React.FC = () => {
     }
   };
 
-  const handleViewProgress = async (viewedCount: number, _totalCount?: number) => {
+  const handleViewProgress = async (
+    viewedCount: number,
+    _totalCount?: number,
+  ) => {
     if (
       currentViewingMonth &&
       !currentViewingMonth.startsWith('TIME_FILTER_') &&
@@ -1158,6 +1168,25 @@ const Home: React.FC = () => {
   const backgroundImage =
     skin === 'blue' ? backgroundImageBlue : backgroundImagePink;
 
+  // Android has no liquid glass and renders elevation shadows on translucent
+  // views as a solid fill, so the filter cards get flat, theme-aware styles.
+  const androidFilterStyles =
+    Platform.OS === 'android'
+      ? skin === 'blue'
+        ? {
+            card: styles.monthFilterCardAndroidBlue,
+            cardActive: styles.monthFilterCardAndroidBlueActive,
+            text: styles.monthFilterCardTextAndroidBlue,
+            textActive: styles.monthFilterCardTextAndroidBlueActive,
+          }
+        : {
+            card: styles.monthFilterCardAndroidPink,
+            cardActive: styles.monthFilterCardAndroidPinkActive,
+            text: styles.monthFilterCardTextAndroidPink,
+            textActive: styles.monthFilterCardTextAndroidPinkActive,
+          }
+      : null;
+
   return (
     <ImageBackground
       source={backgroundImage}
@@ -1333,8 +1362,8 @@ const Home: React.FC = () => {
                               {hideTimeFilters
                                 ? '👁️'
                                 : isSmallScreen
-                                  ? '🚫'
-                                  : 'Hide'}
+                                ? '🚫'
+                                : 'Hide'}
                             </Text>
                           </TouchableOpacity>
                         </View>
@@ -1457,66 +1486,34 @@ const Home: React.FC = () => {
 
               {/* Month Filter Cards */}
               <View style={styles.monthFilterCardsContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.monthFilterCard,
-                    monthFilter === 'all' && styles.monthFilterCardActive,
-                  ]}
-                  onPress={() => setMonthFilter('all')}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.monthFilterCardText,
-                      monthFilter === 'all' && styles.monthFilterCardTextActive,
-                      skin === 'blue' && { color: '#ffffff' },
-                    ]}
-                  >
-                    Show all
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.monthFilterCard,
-                    monthFilter === 'needToFinish' &&
-                    styles.monthFilterCardActive,
-                  ]}
-                  onPress={() => setMonthFilter('needToFinish')}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.monthFilterCardText,
-                      monthFilter === 'needToFinish' &&
-                      styles.monthFilterCardTextActive,
-                      skin === 'blue' && { color: '#ffffff' },
-                    ]}
-                  >
-                    Need to finish
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.monthFilterCard,
-                    monthFilter === 'notStarted' &&
-                    styles.monthFilterCardActive,
-                  ]}
-                  onPress={() => setMonthFilter('notStarted')}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.monthFilterCardText,
-                      monthFilter === 'notStarted' &&
-                      styles.monthFilterCardTextActive,
-                      skin === 'blue' && { color: '#ffffff' },
-                    ]}
-                  >
-                    Not started
-                  </Text>
-                </TouchableOpacity>
+                {MONTH_FILTER_OPTIONS.map(({ key, label }) => {
+                  const isActive = monthFilter === key;
+                  return (
+                    <TouchableOpacity
+                      key={key}
+                      style={[
+                        styles.monthFilterCard,
+                        isActive && styles.monthFilterCardActive,
+                        androidFilterStyles?.card,
+                        isActive && androidFilterStyles?.cardActive,
+                      ]}
+                      onPress={() => setMonthFilter(key)}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.monthFilterCardText,
+                          isActive && styles.monthFilterCardTextActive,
+                          skin === 'blue' && { color: '#ffffff' },
+                          androidFilterStyles?.text,
+                          isActive && androidFilterStyles?.textActive,
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               {monthSummaries
@@ -1552,8 +1549,8 @@ const Home: React.FC = () => {
                     !isLiquidGlassSupported && skin === 'pink'
                       ? gradientPalette.frostyBlue
                       : !isLiquidGlassSupported && skin === 'blue'
-                        ? gradientPalette.frostyPink
-                        : monthGradients[originalIndex % monthGradients.length];
+                      ? gradientPalette.frostyPink
+                      : monthGradients[originalIndex % monthGradients.length];
                   const isCompleted = monthCompletionStatus[summary.monthKey];
                   const progress = monthViewingProgress[summary.monthKey];
                   const showProgress =
@@ -1596,7 +1593,7 @@ const Home: React.FC = () => {
                                       style={[
                                         styles.progressBadge,
                                         skin === 'pink' &&
-                                        styles.progressBadgePink,
+                                          styles.progressBadgePink,
                                       ]}
                                     >
                                       {progress.remaining} left
@@ -1650,7 +1647,7 @@ const Home: React.FC = () => {
                                       style={[
                                         styles.progressBadge,
                                         skin === 'pink' &&
-                                        styles.progressBadgePink,
+                                          styles.progressBadgePink,
                                       ]}
                                     >
                                       {progress.remaining} left
@@ -2512,6 +2509,47 @@ const styles = StyleSheet.create({
   },
   monthFilterCardTextActive: {
     color: '#00D9FF',
+  },
+  // Android-only filter card styles (iOS keeps the glow/glass look above)
+  monthFilterCardAndroidPink: {
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+    borderRadius: 16,
+    shadowColor: 'transparent',
+    elevation: 0,
+  },
+  monthFilterCardAndroidPinkActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderColor: '#4A90E2',
+    borderWidth: 1.5,
+  },
+  monthFilterCardTextAndroidPink: {
+    color: '#1a1a1a',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  monthFilterCardTextAndroidPinkActive: {
+    color: '#2F6FB5',
+  },
+  monthFilterCardAndroidBlue: {
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    borderRadius: 16,
+    shadowColor: 'transparent',
+    elevation: 0,
+  },
+  monthFilterCardAndroidBlueActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.32)',
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+    borderWidth: 1.5,
+  },
+  monthFilterCardTextAndroidBlue: {
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  monthFilterCardTextAndroidBlueActive: {
+    color: '#ffffff',
   },
   blueTintOverlay: {
     position: 'absolute',

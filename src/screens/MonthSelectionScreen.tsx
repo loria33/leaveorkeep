@@ -12,6 +12,7 @@ import {
   ImageBackground,
   Alert,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -54,6 +55,8 @@ const MonthSelectionScreen: React.FC = () => {
     monthSummaries,
     loadMonthContent,
     canViewMedia,
+    sortMode,
+    setSortMode,
   } = useMedia();
 
   const [skin, setSkin] = useState<'pink' | 'blue'>('blue');
@@ -290,6 +293,40 @@ const MonthSelectionScreen: React.FC = () => {
           >
             {totalCount} total items in {monthName}
           </Text>
+
+          {/* Biggest wins first: reorder the month by likely junk */}
+          <View style={styles.sortCard}>
+            <View style={styles.sortTexts}>
+              <Text
+                style={[
+                  styles.sortTitle,
+                  skin === 'blue' && { color: '#ffffff' },
+                ]}
+              >
+                ⚡ Biggest wins first
+              </Text>
+              <Text
+                style={[
+                  styles.sortSubtitle,
+                  skin === 'blue' && { color: 'rgba(255, 255, 255, 0.85)' },
+                ]}
+              >
+                {Platform.OS === 'android'
+                  ? 'Videos, screenshots and chat media first, largest first'
+                  : 'Videos and screenshots first, largest first'}
+              </Text>
+            </View>
+            <Switch
+              value={sortMode === 'junk'}
+              onValueChange={enabled => {
+                setSortMode(enabled ? 'junk' : 'date');
+              }}
+              disabled={isLoading}
+              trackColor={{ false: 'rgba(0, 0, 0, 0.25)', true: '#ff9f1c' }}
+              thumbColor="#ffffff"
+              accessibilityLabel="Biggest wins first"
+            />
+          </View>
 
           {isLoading && (
             <View style={styles.loadingContainer}>
@@ -758,7 +795,31 @@ const styles = StyleSheet.create({
     color: 'rgba(0, 0, 0, 0.7)',
     fontSize: 16,
     textAlign: 'center',
-    marginBottom: 40,
+    marginBottom: 24,
+  },
+  sortCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginHorizontal: 16,
+    marginBottom: 20,
+  },
+  sortTexts: {
+    flex: 1,
+    marginRight: 12,
+  },
+  sortTitle: {
+    color: '#0f172a',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  sortSubtitle: {
+    color: 'rgba(0, 0, 0, 0.65)',
+    fontSize: 12,
+    marginTop: 2,
   },
   loadingContainer: {
     alignItems: 'center',

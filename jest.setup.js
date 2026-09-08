@@ -166,6 +166,8 @@ jest.mock('react-native-fs', () => ({
     ExternalStorageDirectoryPath: '/mock/storage',
     exists: jest.fn(async () => false),
     readDir: jest.fn(async () => []),
+    mkdir: jest.fn(async () => undefined),
+    unlink: jest.fn(async () => undefined),
     downloadFile: jest.fn(() => ({ jobId: 1, promise: Promise.resolve({ statusCode: 200 }) })),
   },
 }));
@@ -206,3 +208,16 @@ jest.mock('react-native-fast-image', () => {
   FastImage.clearDiskCache = jest.fn(async () => undefined);
   return { __esModule: true, default: FastImage };
 });
+
+// Mock react-native-haptic-feedback (native module)
+jest.mock('react-native-haptic-feedback', () => ({
+  __esModule: true,
+  default: {
+    trigger: jest.fn(),
+    impact: jest.fn(),
+    stop: jest.fn(),
+    isSupported: jest.fn(() => true),
+    setEnabled: jest.fn(),
+    isEnabled: jest.fn(() => true),
+  },
+}));

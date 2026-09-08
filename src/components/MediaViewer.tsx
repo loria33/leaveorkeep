@@ -25,6 +25,8 @@ import STT from 'react-native-davoice-tts/stt';
 import { DAVOICE_LICENSE } from '@env';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMedia, MediaItem } from '../context/MediaContext';
+import { formatBytes } from '../utils/format';
+import { hapticKeep, hapticFlick } from '../utils/haptics';
 import { loadViewedItems } from '../utils/viewedMediaTracker';
 import InAppPurchaseManager from '../utils/InAppPurchaseManager';
 import BannerAdManager from '../utils/BannerAdManager';
@@ -1268,6 +1270,11 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       if (executed) {
         // Only a command that actually ran counts as executed
         lastExecutedCommandSignatureRef.current = commandSignature;
+        if (isTrash) {
+          hapticFlick();
+        } else {
+          hapticKeep();
+        }
       } else {
         // Nothing moved (single item, navigation in progress...): undo the locks so
         // the user can simply say it again
@@ -1995,6 +2002,20 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
             </TouchableOpacity>
           </View>
 
+          {/* Biggest wins first: why this item came up now, and what it costs */}
+          {!!currentItem.junkReason && (
+            <View style={styles.junkBadgeWrap} pointerEvents="none">
+              <View style={styles.junkBadge}>
+                <Text style={styles.junkBadgeText}>
+                  ⚡ {currentItem.junkReason}
+                  {formatBytes(currentItem.size)
+                    ? ` · ${formatBytes(currentItem.size)}`
+                    : ''}
+                </Text>
+              </View>
+            </View>
+          )}
+
           {/* Bottom Controls */}
           <View style={styles.bottomControls}>
             <TouchableOpacity
@@ -2183,6 +2204,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     zIndex: 1,
+  },
+  junkBadgeWrap: {
+    position: 'absolute',
+    top: 116,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 1,
+  },
+  junkBadge: {
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  junkBadgeText: {
+    color: '#ffd166',
+    fontSize: 13,
+    fontWeight: '700',
   },
   voiceButton: {
     paddingHorizontal: 20,

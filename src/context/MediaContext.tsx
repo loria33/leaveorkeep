@@ -29,6 +29,24 @@ import {
   markMonthAsCompleted,
   unmarkMonthAsCompleted,
 } from '../utils/viewedMediaTracker';
+import {
+  fetchMonthPage,
+  getSortMode,
+  loadSortMode,
+  persistSortMode,
+  SortMode,
+} from '../utils/sortMode';
+import {
+  GhostEntry,
+  stageGhosts,
+  commitGhosts,
+  discardGhosts,
+  loadGhosts,
+  removeGhost as removeGhostEntry,
+  wipeGhosts,
+  loadGhostAlbumEnabled,
+  saveGhostAlbumEnabled,
+} from '../utils/ghostAlbum';
 
 export interface MediaItem {
   id: string;
@@ -38,7 +56,17 @@ export interface MediaItem {
   source: string;
   filename: string;
   location?: string;
+  /** Bytes on device; only filled by the ranked ("Biggest wins first") fetch and ghosts */
   size?: number;
+  /** Why "Biggest wins first" surfaced this item: "Video", "Screenshot", "WhatsApp", … */
+  junkReason?: string;
+  /** 0 = videos, 1 = screenshots, 2 = chat media, 3 = other photos */
+  junkRank?: number;
+}
+
+export interface DeleteOptions {
+  /** Leave no ghost behind in the Ghost Album */
+  shred?: boolean;
 }
 
 export interface GroupedMedia {
@@ -98,9 +126,23 @@ export interface MediaContextType {
   setMediaItems: (items: MediaItem[]) => void;
   addToTrash: (item: MediaItem) => void;
   restoreFromTrash: (item: MediaItem) => void;
-  deleteFromTrash: (item: MediaItem) => Promise<void>;
-  deleteBatchFromTrash: (items: MediaItem[]) => Promise<void>;
+  deleteFromTrash: (item: MediaItem, options?: DeleteOptions) => Promise<void>;
+  deleteBatchFromTrash: (
+    items: MediaItem[],
+    options?: DeleteOptions,
+  ) => Promise<void>;
   restoreBatchFromTrash: (items: MediaItem[]) => Promise<void>;
+
+  // Sort mode ("Biggest wins first")
+  sortMode: SortMode;
+  setSortMode: (mode: SortMode) => Promise<void>;
+
+  // Ghost Album
+  ghosts: GhostEntry[];
+  ghostAlbumEnabled: boolean;
+  setGhostAlbumEnabled: (enabled: boolean) => Promise<void>;
+  removeGhost: (ghostId: string) => Promise<void>;
+  wipeGhostAlbum: () => Promise<void>;
 
   setHasPermission: (hasPermission: boolean) => void;
   setOnboardingComplete: (complete: boolean) => void;
@@ -228,6 +270,9 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   const [hasPermission, setHasPermission] = useState(false);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [isPremiumUser, setIsPremiumUser] = useState(false);
+  const [sortMode, setSortModeState] = useState<SortMode>(getSortMode());
+  const [ghosts, setGhosts] = useState<GhostEntry[]>([]);
+  const [ghostAlbumEnabled, setGhostAlbumEnabledState] = useState(true);
   const [viewingLimits, setViewingLimits] = useState<ViewingLimits>({
     viewCount: 0,
     lastResetTime: Date.now(),
@@ -309,7 +354,26 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   useEffect(() => {
     loadPersistedData();
     loadViewedMediaData();
+    loadSortModeData();
+    loadGhostAlbumData();
   }, []);
+
+  const loadSortModeData = async () => {
+    setSortModeState(await loadSortMode());
+  };
+
+  const loadGhostAlbumData = async () => {
+    try {
+      const [entries, enabled] = await Promise.all([
+        loadGhosts(),
+        loadGhostAlbumEnabled(),
+      ]);
+      setGhosts(entries);
+      setGhostAlbumEnabledState(enabled);
+    } catch {
+      // Ghost Album starts empty
+    }
+  };
 
   // Load viewed media tracking data
   const loadViewedMediaData = async () => {
@@ -531,12 +595,7 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     }));
 
     try {
-      const { fetchMonthPhotosNative } = await import('../native/PhotoMonths');
-      const nativePhotos = await fetchMonthPhotosNative(
-        monthKey,
-        0,
-        actualLimit,
-      );
+      const nativePhotos = await fetchMonthPage(monthKey, 0, actualLimit);
       const hasMore = Boolean(
         nativePhotos && nativePhotos.length === actualLimit,
       );
@@ -659,13 +718,8 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
       },
     }));
     try {
-      const { fetchMonthPhotosNative } = await import('../native/PhotoMonths');
       const offset = current.items.length;
-      const morePhotos = await fetchMonthPhotosNative(
-        monthKey,
-        offset,
-        actualLimit,
-      );
+      const morePhotos = await fetchMonthPage(monthKey, offset, actualLimit);
       // hasMore logic:
       // - If we got fewer items than requested, there are no more available
       // - If we got exactly the number requested, there might be more (set to true)
@@ -854,52 +908,107 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     });
   };
 
-  const deleteFromTrash = async (item: MediaItem) => {
+  // Deletion goes through the item's real URI: `ph://…` on iOS, `content://…` on
+  // Android. Only legacy ids from the CameraRoll scanner embed the URI plus an index.
+  const deletableUri = (item: MediaItem): string => {
+    if (/^(ph|content|file|assets-library):\/\//.test(item.uri)) return item.uri;
+    const legacy = item.id.replace(/\d+$/, '');
+    return legacy || item.uri;
+  };
+
+  // Ghost first, then delete, and keep the ghost only if the delete went through, so a
+  // cancelled system dialog never leaves a ghost of a photo that still exists.
+  const deleteFromDevice = async (
+    items: MediaItem[],
+    options?: DeleteOptions,
+  ) => {
+    const wantGhosts = ghostAlbumEnabled && !options?.shred;
+    const staged = wantGhosts
+      ? await stageGhosts(items).catch(() => [] as GhostEntry[])
+      : [];
+
+    try {
+      await CameraRoll.deletePhotos(items.map(deletableUri));
+    } catch (error) {
+      await discardGhosts(staged);
+      throw error;
+    }
+
+    if (staged.length > 0) {
+      try {
+        setGhosts(await commitGhosts(staged));
+      } catch {
+        // Thumbnails are on disk; the index simply misses them
+      }
+    }
+  };
+
+  const deleteFromTrash = async (item: MediaItem, options?: DeleteOptions) => {
     setTrashedItems(prev => prev.filter(i => i.id !== item.id));
 
     try {
-      // Extract the original URI from the ID (ID format: originalUri + index)
-      // We need to find where the index starts by looking for the last occurrence of digits
-      const originalUri = item.id.replace(/\d+$/, ''); // Remove trailing digits (index)
-
-      // For iOS, we need to use the original ph:// URI for deletion
-      // For Android, we can use the file path
-      const uriToDelete = originalUri || item.uri;
-
-      // Try to delete from device photo library
-      await CameraRoll.deletePhotos([uriToDelete]);
+      await deleteFromDevice([item], options);
     } catch (error) {
       // If deletion fails, the item is still removed from trash
       // This handles cases where:
       // - User denies deletion permission on iOS
       // - File no longer exists on device
       // - Other system errors
-      // - URI extraction failed
     }
   };
 
-  const deleteBatchFromTrash = async (items: MediaItem[]) => {
+  const deleteBatchFromTrash = async (
+    items: MediaItem[],
+    options?: DeleteOptions,
+  ) => {
     // Remove all items from trash first
     setTrashedItems(prev =>
       prev.filter(i => !items.some(item => item.id === i.id)),
     );
 
     try {
-      // Extract all URIs for batch deletion
-      const urisToDelete = items.map(item => {
-        const originalUri = item.id.replace(/\d+$/, ''); // Remove trailing digits (index)
-        return originalUri || item.uri;
-      });
-
       // Delete all photos at once with a single iOS confirmation dialog
-      await CameraRoll.deletePhotos(urisToDelete);
+      await deleteFromDevice(items, options);
     } catch (error) {
       // If deletion fails, the items are still removed from trash
       // This handles cases where:
       // - User denies deletion permission on iOS
       // - Some files no longer exist on device
       // - Other system errors
-      // - URI extraction failed
+    }
+  };
+
+  // ----- Sort mode -----
+
+  const setSortMode = async (mode: SortMode) => {
+    setSortModeState(mode);
+    await persistSortMode(mode);
+    // Loaded months are in the old order; drop them so they reload in the new one
+    monthAccessOrder.current = [];
+    setMonthContent({});
+  };
+
+  // ----- Ghost Album -----
+
+  const setGhostAlbumEnabled = async (enabled: boolean) => {
+    setGhostAlbumEnabledState(enabled);
+    await saveGhostAlbumEnabled(enabled);
+  };
+
+  const removeGhost = async (ghostId: string) => {
+    try {
+      setGhosts(await removeGhostEntry(ghostId));
+    } catch {
+      // Leave the list as it is
+    }
+  };
+
+  const wipeGhostAlbum = async () => {
+    try {
+      await wipeGhosts();
+      setGhosts([]);
+    } catch {
+      // Leave the list as it is
     }
   };
 
@@ -1175,6 +1284,13 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     restoreBatchFromTrash,
     deleteFromTrash,
     deleteBatchFromTrash,
+    sortMode,
+    setSortMode,
+    ghosts,
+    ghostAlbumEnabled,
+    setGhostAlbumEnabled,
+    removeGhost,
+    wipeGhostAlbum,
     setHasPermission: handleSetPermission,
     setOnboardingComplete: handleSetOnboardingComplete,
 

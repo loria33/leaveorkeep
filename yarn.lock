@@ -5775,6 +5775,11 @@ react-native-google-mobile-ads@^16.5.0:
     "@iabtcf/core" "^1.5.6"
     use-deep-compare-effect "^1.8.1"
 
+react-native-haptic-feedback@^3.0.0:
+  version "3.0.0"
+  resolved "https://registry.yarnpkg.com/react-native-haptic-feedback/-/react-native-haptic-feedback-3.0.0.tgz#a1e144c491885e65917cafb0c17d4ad2891ecc7e"
+  integrity sha512-yxBQFHhXU8S0xupGtzDRToGw5yMWezUdLzxtlx2Oi9YpjPwprWZWCw8foPt0S2t84B0ZikzZYyOHiMSXIelUxg==
+
 react-native-iap@^16.5.0:
   version "16.5.0"
   resolved "https://registry.yarnpkg.com/react-native-iap/-/react-native-iap-16.5.0.tgz#bb85950c94b2cf93d5eee4a73e707ce88ec81d8c"

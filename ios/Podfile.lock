@@ -1956,6 +1956,28 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - RNReactNativeHapticFeedback (3.0.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-bridging
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - RNScreens (4.27.0):
     - hermes-engine
     - RCTRequired
@@ -2161,6 +2183,7 @@ DEPENDENCIES:
   - RNGestureHandler (from `../node_modules/react-native-gesture-handler`)
   - RNGoogleMobileAds (from `../node_modules/react-native-google-mobile-ads`)
   - RNPermissions (from `../node_modules/react-native-permissions`)
+  - RNReactNativeHapticFeedback (from `../node_modules/react-native-haptic-feedback`)
   - RNScreens (from `../node_modules/react-native-screens`)
   - RNShare (from `../node_modules/react-native-share`)
   - RNVectorIcons (from `../node_modules/react-native-vector-icons`)
@@ -2377,6 +2400,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-google-mobile-ads"
   RNPermissions:
     :path: "../node_modules/react-native-permissions"
+  RNReactNativeHapticFeedback:
+    :path: "../node_modules/react-native-haptic-feedback"
   RNScreens:
     :path: "../node_modules/react-native-screens"
   RNShare:
@@ -2495,6 +2520,7 @@ SPEC CHECKSUMS:
   RNGestureHandler: 63727d42f0b6ea951168615f8af3160ad7b57a57
   RNGoogleMobileAds: e367496b09f6d3a3755d9907f34679eef65f2d35
   RNPermissions: d185a7818e71ec72c33c56eee62ca3b1975daffd
+  RNReactNativeHapticFeedback: 7f0e5435fa5153de77f2e61796cbbba5eb131a87
   RNScreens: 0135deb65b65d207ee6294d0baf06681e1071d93
   RNShare: 38cff312f1bb0aacefedcb0cbdf6fd7c761645d0
   RNVectorIcons: 0217fc398497d922836f26b09582a423f0708890

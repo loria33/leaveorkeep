@@ -11,18 +11,21 @@ import {
   Dimensions,
   Image,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useMedia, MediaItem } from '../context/MediaContext';
 
 const { width } = Dimensions.get('window');
 const itemWidth = (width - 48) / 2; // 2 columns with padding
 
 const Trash: React.FC = () => {
+  const navigation = useNavigation<any>();
   const {
     trashedItems,
     restoreFromTrash,
-    deleteFromTrash,
     deleteBatchFromTrash,
     restoreBatchFromTrash,
+    ghosts,
+    ghostAlbumEnabled,
   } = useMedia();
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
@@ -64,53 +67,64 @@ const Trash: React.FC = () => {
         },
         {
           text: 'Delete Permanently',
-          onPress: async () => {
-            try {
-              await deleteFromTrash(item);
-            } catch (error) {
-              Alert.alert(
-                'Deletion Complete',
-                'Item has been removed from the app. It may still exist in your device gallery if deletion was not permitted.',
-                [{ text: 'OK' }],
-              );
-            }
-          },
+          onPress: () => confirmDelete([item]),
           style: 'destructive',
         },
       ],
     );
   };
 
+  // Every permanent delete passes through here. With the Ghost Album on, the user
+  // picks between leaving a ghost (Delete) or no trace at all (Shred).
   const confirmDelete = (items: MediaItem[]) => {
     const itemCount = items.length;
+    const noun = `${itemCount} item${itemCount > 1 ? 's' : ''}`;
+
+    const runDelete = async (shred: boolean) => {
+      try {
+        await deleteBatchFromTrash(items, { shred });
+      } catch {
+        // Items are removed from trash even if device deletion fails
+        Alert.alert(
+          'Deletion Complete',
+          'Items have been removed from the app. Some items may still exist in your device gallery if deletion was not permitted.',
+          [{ text: 'OK' }],
+        );
+      } finally {
+        setSelectedItems(new Set());
+        setSelectionMode(false);
+      }
+    };
+
+    const ghostNote = ghostAlbumEnabled
+      ? '\n\nDelete keeps a tiny ghost in your Ghost Album. Shred leaves no trace.'
+      : '';
+
     Alert.alert(
       'Delete Permanently',
-      `Are you sure you want to permanently delete ${itemCount} item${
-        itemCount > 1 ? 's' : ''
-      }? This action cannot be undone.\n\nNote: iOS will show one confirmation dialog for all items.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Permanently',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteBatchFromTrash(items);
-              setSelectedItems(new Set());
-              setSelectionMode(false);
-            } catch (error) {
-              // Items are removed from trash even if device deletion fails
-              setSelectedItems(new Set());
-              setSelectionMode(false);
-              Alert.alert(
-                'Deletion Complete',
-                'Items have been removed from the app. Some items may still exist in your device gallery if deletion was not permitted.',
-                [{ text: 'OK' }],
-              );
-            }
-          },
-        },
-      ],
+      `Are you sure you want to permanently delete ${noun}? This action cannot be undone.${ghostNote}\n\nNote: iOS will show one confirmation dialog for all items.`,
+      ghostAlbumEnabled
+        ? [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Shred',
+              style: 'destructive',
+              onPress: () => runDelete(true),
+            },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: () => runDelete(false),
+            },
+          ]
+        : [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete Permanently',
+              style: 'destructive',
+              onPress: () => runDelete(false),
+            },
+          ],
     );
   };
 
@@ -137,33 +151,7 @@ const Trash: React.FC = () => {
   };
 
   const handleDeleteAll = () => {
-    Alert.alert(
-      'Delete All Items',
-      `Are you sure you want to permanently delete all ${trashedItems.length} items in trash? This action cannot be undone.\n\nNote: iOS will show one confirmation dialog for all items.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete All',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteBatchFromTrash(trashedItems);
-              setSelectedItems(new Set());
-              setSelectionMode(false);
-            } catch (error) {
-              // Items are removed from trash even if device deletion fails
-              setSelectedItems(new Set());
-              setSelectionMode(false);
-              Alert.alert(
-                'Deletion Complete',
-                'Items have been removed from the app. Some items may still exist in your device gallery if deletion was not permitted.',
-                [{ text: 'OK' }],
-              );
-            }
-          },
-        },
-      ],
-    );
+    confirmDelete(trashedItems);
   };
 
   const cancelSelection = () => {
@@ -228,22 +216,33 @@ const Trash: React.FC = () => {
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           ) : (
-            trashedItems.length > 0 && (
-              <>
-                <TouchableOpacity
-                  onPress={handleRestoreAll}
-                  style={styles.restoreAllButton}
-                >
-                  <Text style={styles.deleteAllText}>Restore All</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={handleDeleteAll}
-                  style={styles.deleteAllButton}
-                >
-                  <Text style={styles.deleteAllText}>Delete All</Text>
-                </TouchableOpacity>
-              </>
-            )
+            <>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('GhostAlbum')}
+                style={styles.ghostButton}
+                accessibilityLabel="Open Ghost Album"
+              >
+                <Text style={styles.ghostButtonText}>
+                  👻{ghosts.length > 0 ? ` ${ghosts.length}` : ''}
+                </Text>
+              </TouchableOpacity>
+              {trashedItems.length > 0 && (
+                <>
+                  <TouchableOpacity
+                    onPress={handleRestoreAll}
+                    style={styles.restoreAllButton}
+                  >
+                    <Text style={styles.deleteAllText}>Restore All</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleDeleteAll}
+                    style={styles.deleteAllButton}
+                  >
+                    <Text style={styles.deleteAllText}>Delete All</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </>
           )}
         </View>
       </View>
@@ -255,7 +254,8 @@ const Trash: React.FC = () => {
           <Text style={styles.emptyTitle}>Trash is Empty</Text>
           <Text style={styles.emptyText}>
             Items you choose to trash will appear here. You can restore them or
-            delete them permanently.
+            delete them permanently. Deleted items leave a tiny ghost in your
+            Ghost Album, so you never have to wonder what you let go.
           </Text>
         </View>
       ) : (
@@ -443,6 +443,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: '#dc3545',
     borderRadius: 8,
+  },
+  ghostButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#f1f3f5',
+    borderRadius: 8,
+    marginRight: 8,
+  },
+  ghostButtonText: {
+    color: '#212529',
+    fontSize: 14,
+    fontWeight: '600',
   },
   restoreAllButton: {
     paddingVertical: 8,

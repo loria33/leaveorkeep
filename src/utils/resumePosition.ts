@@ -1,5 +1,5 @@
 import { MediaItem } from '../context/MediaContext';
-import { fetchMonthPhotosNative } from '../native/PhotoMonths';
+import { fetchMonthPage } from './sortMode';
 import { getLastViewedItemId, loadViewedItems } from './viewedMediaTracker';
 
 export type ViewerMediaType = 'photos' | 'videos' | 'all';
@@ -54,11 +54,7 @@ export const findResumePositionInMonth = async (
   let firstUnviewed: { rawIndex: number; filteredIndex: number } | null = null;
 
   while (true) {
-    const batch = await fetchMonthPhotosNative(
-      monthKey,
-      offset,
-      SCAN_BATCH_SIZE,
-    );
+    const batch = await fetchMonthPage(monthKey, offset, SCAN_BATCH_SIZE);
     if (!batch || batch.length === 0) break;
 
     for (const item of batch) {
