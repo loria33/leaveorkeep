@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { TAB_BAR_CLEARANCE_STATIC } from '../theme';
 import {
   View,
   Text,
@@ -321,6 +322,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     padding: 16,
+    paddingBottom: TAB_BAR_CLEARANCE_STATIC,
   },
   itemContainer: {
     width: itemWidth,

@@ -79,6 +79,13 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace "com.redcalf.keepflick"
+    // The DaVoice voice model lives in voice-models/raw at the repo root so iOS
+    // and Android ship the same file (see src/utils/voicePrompt.ts)
+    sourceSets {
+        main {
+            res.srcDirs += ['../../voice-models']
+        }
+    }
     defaultConfig {
         applicationId "com.redcalf.keepflick"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -137,3 +144,9 @@ dependencies {
     // Console flags as "does not support 16 KB memory page sizes".
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
 }
+
+// react-native-vector-icons: copy only the icon font the app uses into assets/fonts
+project.ext.vectoricons = [
+    iconFontNames: [ 'Ionicons.ttf' ]
+]
+apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")

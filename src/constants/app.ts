@@ -2,6 +2,7 @@
 export const APP_CONFIG = {
   // Viewing Limits
   MAX_VIEWS: 55, // Maximum number of pictures that can be viewed per hour
+  VIEW_COOLDOWN_MINUTES: 15, // How long free views take to refill once they run out
   HOURLY_RESET: true, // Reset views every hour
 
   // Whisper model configuration
@@ -43,6 +44,7 @@ export const APP_CONFIG = {
 export const getViewingConfig = () => {
   return {
     maxViews: APP_CONFIG.MAX_VIEWS,
+    cooldownMinutes: APP_CONFIG.VIEW_COOLDOWN_MINUTES,
     hourlyReset: APP_CONFIG.HOURLY_RESET,
   };
 };

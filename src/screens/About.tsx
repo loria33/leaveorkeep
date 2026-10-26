@@ -6,15 +6,13 @@ import {
   SafeAreaView,
   StatusBar,
   TouchableOpacity,
-  Switch,
   ScrollView,
-  Alert,
-  ActivityIndicator,
   ImageBackground,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import InAppPurchaseManager from '../utils/InAppPurchaseManager';
 import { useMedia } from '../context/MediaContext';
+import UpgradeSheet from '../components/UpgradeSheet';
 
 const backgroundImagePink = require('../assets/bg.png');
 const backgroundImageBlue = require('../assets/bg2.jpg');
@@ -25,18 +23,9 @@ interface AboutProps {
 }
 
 const About: React.FC<AboutProps> = ({ onClose, onPreferencesChanged }) => {
-  const { setPremiumStatus: setMediaPremiumStatus } = useMedia();
-  const [hideTimeFilters, setHideTimeFilters] = useState(false);
-  const [isPremium, setIsPremium] = useState(false);
-  const [isLoadingPurchase, setIsLoadingPurchase] = useState(false);
-  const [isInitializing, setIsInitializing] = useState(true);
+  const { isPremiumUser, setPremiumStatus: setMediaPremiumStatus } = useMedia();
+  const [upgradeSheetVisible, setUpgradeSheetVisible] = useState(false);
   const [skin, setSkin] = useState<'pink' | 'blue'>('blue');
-
-  const toggleHideTimeFilters = async (value: boolean) => {
-    setHideTimeFilters(value);
-    await AsyncStorage.setItem('hideTimeFilters', JSON.stringify(value));
-    onPreferencesChanged?.();
-  };
 
   const handleSkinChange = async (newSkin: 'pink' | 'blue') => {
     setSkin(newSkin);
@@ -48,102 +37,23 @@ const About: React.FC<AboutProps> = ({ onClose, onPreferencesChanged }) => {
     // Load saved preferences and premium status
     const loadPreferences = async () => {
       try {
-        const timeFiltersHidden = await AsyncStorage.getItem('hideTimeFilters');
-
-        if (timeFiltersHidden) {
-          setHideTimeFilters(JSON.parse(timeFiltersHidden));
-        }
-
         const savedSkin = await AsyncStorage.getItem('skin');
         if (savedSkin === 'pink' || savedSkin === 'blue') {
           setSkin(savedSkin);
         }
 
-        // Initialize IAP and check premium status
+        // Verify premium with the store and sync it into MediaContext
         const iapManager = InAppPurchaseManager.getInstance();
         await iapManager.initialize();
         const premiumStatus = await iapManager.checkPremiumStatus();
-        setIsPremium(premiumStatus);
-        // Sync with MediaContext
         await setMediaPremiumStatus(premiumStatus);
-        setIsInitializing(false);
-      } catch (error) {
-        setIsInitializing(false);
+      } catch {
+        // Store unreachable; MediaContext keeps the last known status
       }
     };
 
     loadPreferences();
   }, []);
-
-  const handlePurchaseRemoveAds = async () => {
-    if (isPremium) {
-      Alert.alert(
-        'Already Premium',
-        'You already have Premium features enabled. Enjoy your unlimited, ad-free experience!',
-      );
-      return;
-    }
-
-    setIsLoadingPurchase(true);
-    try {
-      const iapManager = InAppPurchaseManager.getInstance();
-      const success = await iapManager.purchaseRemoveAds();
-
-      if (success) {
-        // Purchase will be handled by the purchase listener
-        // Check status after a short delay
-        setTimeout(async () => {
-          const premiumStatus = await iapManager.checkPremiumStatus();
-          setIsPremium(premiumStatus);
-          // Sync with MediaContext
-          await setMediaPremiumStatus(premiumStatus);
-          setIsLoadingPurchase(false);
-          if (premiumStatus) {
-            Alert.alert(
-              'Success',
-              'Premium activated! Enjoy unlimited views and an ad-free experience.',
-            );
-          }
-        }, 1000);
-      } else {
-        setIsLoadingPurchase(false);
-      }
-    } catch (error: any) {
-      setIsLoadingPurchase(false);
-      Alert.alert(
-        'Purchase Failed',
-        error.message || 'Unable to complete the purchase. Please try again.',
-      );
-    }
-  };
-
-  const handleRestorePurchases = async () => {
-    setIsLoadingPurchase(true);
-    try {
-      const iapManager = InAppPurchaseManager.getInstance();
-      const restored = await iapManager.restorePurchases();
-
-      if (restored) {
-        const premiumStatus = await iapManager.checkPremiumStatus();
-        setIsPremium(premiumStatus);
-        // Sync with MediaContext
-        await setMediaPremiumStatus(premiumStatus);
-        Alert.alert('Success', 'Your purchases have been restored.');
-      } else {
-        Alert.alert(
-          'No Purchases Found',
-          'No previous purchases were found to restore.',
-        );
-      }
-    } catch (error: any) {
-      Alert.alert(
-        'Restore Failed',
-        error.message || 'Unable to restore purchases. Please try again.',
-      );
-    } finally {
-      setIsLoadingPurchase(false);
-    }
-  };
 
   const backgroundImage =
     skin === 'blue' ? backgroundImageBlue : backgroundImagePink;
@@ -193,22 +103,15 @@ const About: React.FC<AboutProps> = ({ onClose, onPreferencesChanged }) => {
               >
                 Go Premium
               </Text>
-              {!isPremium && (
+              {!isPremiumUser && (
                 <TouchableOpacity
-                  style={[
-                    styles.purchaseButton,
-                    isLoadingPurchase && styles.purchaseButtonDisabled,
-                  ]}
-                  onPress={handlePurchaseRemoveAds}
-                  disabled={isLoadingPurchase || isInitializing}
+                  style={styles.purchaseButton}
+                  onPress={() => setUpgradeSheetVisible(true)}
+                  accessibilityRole="button"
                 >
-                  {isLoadingPurchase ? (
-                    <ActivityIndicator color="#ffffff" />
-                  ) : (
-                    <Text style={styles.purchaseButtonText}>
-                      Upgrade to Premium
-                    </Text>
-                  )}
+                  <Text style={styles.purchaseButtonText}>
+                    Upgrade to Premium
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -222,15 +125,15 @@ const About: React.FC<AboutProps> = ({ onClose, onPreferencesChanged }) => {
               photos and videos without any interruptions or restrictions.
             </Text>
 
-            {isPremium ? (
+            {isPremiumUser ? (
               <View style={styles.premiumBadge}>
                 <Text style={styles.premiumBadgeText}>✓ Premium Active</Text>
               </View>
             ) : (
               <TouchableOpacity
                 style={styles.restoreButton}
-                onPress={handleRestorePurchases}
-                disabled={isLoadingPurchase || isInitializing}
+                onPress={() => setUpgradeSheetVisible(true)}
+                accessibilityRole="button"
               >
                 <Text style={styles.restoreButtonText}>Restore Purchases</Text>
               </TouchableOpacity>
@@ -247,35 +150,6 @@ const About: React.FC<AboutProps> = ({ onClose, onPreferencesChanged }) => {
             >
               Display Settings
             </Text>
-
-            {/* Hide Time Filters Toggle */}
-            <View style={styles.settingRow}>
-              <View style={styles.settingInfo}>
-                <Text
-                  style={[
-                    styles.settingTitle,
-                    skin === 'blue' && { color: '#ffffff' },
-                  ]}
-                >
-                  Hide Time Filters
-                </Text>
-                <Text
-                  style={[
-                    styles.settingDescription,
-                    skin === 'blue' && { color: 'rgba(255, 255, 255, 0.8)' },
-                  ]}
-                >
-                  Hide the time filter buttons (Today, Yesterday, This Week,
-                  This Month)
-                </Text>
-              </View>
-              <Switch
-                value={hideTimeFilters}
-                onValueChange={toggleHideTimeFilters}
-                trackColor={{ false: '#e0e0e0', true: '#4ECDC4' }}
-                thumbColor={hideTimeFilters ? '#ffffff' : '#f4f3f4'}
-              />
-            </View>
 
             {/* Skin Selection */}
             <View style={styles.settingRow}>
@@ -423,6 +297,10 @@ const About: React.FC<AboutProps> = ({ onClose, onPreferencesChanged }) => {
             </Text>
           </View>
         </ScrollView>
+        <UpgradeSheet
+          visible={upgradeSheetVisible}
+          onClose={() => setUpgradeSheetVisible(false)}
+        />
       </SafeAreaView>
     </ImageBackground>
   );
@@ -550,9 +428,6 @@ const styles = StyleSheet.create({
     marginTop: 0,
     marginBottom: 0,
     flexShrink: 0,
-  },
-  purchaseButtonDisabled: {
-    opacity: 0.6,
   },
   purchaseButtonText: {
     fontSize: 16,

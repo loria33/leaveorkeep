@@ -158,17 +158,34 @@ jest.mock('react-native-davoice-tts/stt', () => ({
   },
 }));
 
+// Mock react-native-davoice-tts text-to-speech (native module)
+jest.mock('react-native-davoice-tts', () => {
+  class DaVoiceTTSInstance {
+    initTTS = jest.fn(async () => 'TTS initialized');
+    setLicense = jest.fn(async () => true);
+    speak = jest.fn(async () => undefined);
+    stopSpeaking = jest.fn(async () => undefined);
+    destroy = jest.fn(async () => undefined);
+    onFinishedSpeaking = jest.fn(() => () => {});
+  }
+  return { __esModule: true, DaVoiceTTSInstance, default: DaVoiceTTSInstance };
+});
+
 // Mock react-native-fs (constructs a NativeEventEmitter at import time)
 jest.mock('react-native-fs', () => ({
   __esModule: true,
   default: {
     DocumentDirectoryPath: '/mock/documents',
+    CachesDirectoryPath: '/mock/caches',
     ExternalStorageDirectoryPath: '/mock/storage',
     exists: jest.fn(async () => false),
     readDir: jest.fn(async () => []),
     mkdir: jest.fn(async () => undefined),
     unlink: jest.fn(async () => undefined),
-    downloadFile: jest.fn(() => ({ jobId: 1, promise: Promise.resolve({ statusCode: 200 }) })),
+    downloadFile: jest.fn(() => ({
+      jobId: 1,
+      promise: Promise.resolve({ statusCode: 200 }),
+    })),
   },
 }));
 
@@ -177,8 +194,9 @@ jest.mock('@react-native-community/netinfo', () =>
   require('@react-native-community/netinfo/jest/netinfo-mock.js'),
 );
 // The shipped mock is a CommonJS default export, so unwrap it for named imports
-jest.mock('react-native-safe-area-context', () =>
-  require('react-native-safe-area-context/jest/mock').default,
+jest.mock(
+  'react-native-safe-area-context',
+  () => require('react-native-safe-area-context/jest/mock').default,
 );
 
 // Mock react-native-share
@@ -191,7 +209,9 @@ jest.mock('react-native-share', () => ({
 jest.mock('react-native-video', () => {
   const React = require('react');
   const { View } = require('react-native');
-  const Video = React.forwardRef((props, ref) => React.createElement(View, { ...props, ref }));
+  const Video = React.forwardRef((props, ref) =>
+    React.createElement(View, { ...props, ref }),
+  );
   return { __esModule: true, default: Video };
 });
 
@@ -200,9 +220,18 @@ jest.mock('react-native-fast-image', () => {
   const React = require('react');
   const { Image } = require('react-native');
   const FastImage = props => React.createElement(Image, props);
-  FastImage.resizeMode = { contain: 'contain', cover: 'cover', stretch: 'stretch', center: 'center' };
+  FastImage.resizeMode = {
+    contain: 'contain',
+    cover: 'cover',
+    stretch: 'stretch',
+    center: 'center',
+  };
   FastImage.priority = { low: 'low', normal: 'normal', high: 'high' };
-  FastImage.cacheControl = { immutable: 'immutable', web: 'web', cacheOnly: 'cacheOnly' };
+  FastImage.cacheControl = {
+    immutable: 'immutable',
+    web: 'web',
+    cacheOnly: 'cacheOnly',
+  };
   FastImage.preload = jest.fn();
   FastImage.clearMemoryCache = jest.fn(async () => undefined);
   FastImage.clearDiskCache = jest.fn(async () => undefined);
@@ -221,3 +250,15 @@ jest.mock('react-native-haptic-feedback', () => ({
     isEnabled: jest.fn(() => true),
   },
 }));
+
+// Mock react-native-vector-icons (icon fonts are registered natively)
+jest.mock('react-native-vector-icons/Ionicons', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  const Icon = ({ name, ...props }) => React.createElement(Text, props, name);
+  // Reject so the tab bar never schedules a state update outside act() in tests
+  Icon.loadFont = jest.fn(() =>
+    Promise.reject(new Error('already registered')),
+  );
+  return { __esModule: true, default: Icon };
+});

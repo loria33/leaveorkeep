@@ -49,5 +49,18 @@ target 'leaveMkeepM' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # react_native_post_install only raises the deployment target of each pod's
+    # main target. Resource bundle targets (e.g. *PrivacyInfo, *_resources)
+    # keep the podspec's old value (9.0 / 12.0 / 13.4), which Xcode 27 rejects.
+    min_target = min_ios_version_supported.to_f
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+        if current.nil? || current.to_f < min_target
+          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = min_ios_version_supported
+        end
+      end
+    end
   end
 end

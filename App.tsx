@@ -2,8 +2,9 @@ import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, StyleSheet, Platform } from 'react-native';
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StyleSheet, Platform } from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import mobileAds, { MaxAdContentRating } from 'react-native-google-mobile-ads';
 import { request, PERMISSIONS, RESULTS } from 'react-native-permissions';
 
@@ -21,8 +22,14 @@ import Home from './src/screens/Home';
 import Trash from './src/screens/Trash';
 import GhostAlbum from './src/screens/GhostAlbum';
 import About from './src/screens/About';
-import MediaViewerScreen, { MediaViewerScreenParams } from './src/screens/MediaViewerScreen';
-import MonthSelectionScreen, { MonthSelectionScreenParams } from './src/screens/MonthSelectionScreen';
+import MediaViewerScreen, {
+  MediaViewerScreenParams,
+} from './src/screens/MediaViewerScreen';
+import MonthSelectionScreen, {
+  MonthSelectionScreenParams,
+} from './src/screens/MonthSelectionScreen';
+import { colors } from './src/theme';
+import FloatingTabBar from './src/components/FloatingTabBar';
 
 // Navigation Types
 type RootStackParamList = {
@@ -100,23 +107,14 @@ const TrashStackNavigator: React.FC = () => {
 // Tab Navigator
 const MainTabs: React.FC = () => {
   const { trashedItems } = useMedia();
-  const insets = useSafeAreaInsets();
 
   return (
     <Tab.Navigator
       initialRouteName="HomeStack"
+      tabBar={props => <FloatingTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#007bff',
-        tabBarInactiveTintColor: '#6c757d',
-        tabBarStyle: [
-          styles.tabBar,
-          {
-            paddingBottom: Math.max(insets.bottom, 4),
-            height: 60 + Math.max(insets.bottom - 4, 0),
-          },
-        ],
-        tabBarLabelStyle: styles.tabBarLabel,
+        sceneStyle: styles.scene,
       }}
     >
       <Tab.Screen
@@ -124,8 +122,14 @@ const MainTabs: React.FC = () => {
         component={About}
         options={{
           tabBarLabel: 'About',
-          tabBarIcon: ({ color, size }) => (
-            <Text style={[styles.tabIcon, { color, fontSize: size }]}>ℹ️</Text>
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={
+                focused ? 'information-circle' : 'information-circle-outline'
+              }
+              size={size}
+              color={color}
+            />
           ),
         }}
       />
@@ -134,8 +138,12 @@ const MainTabs: React.FC = () => {
         component={HomeStackNavigator}
         options={{
           tabBarLabel: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <Text style={[styles.tabIcon, { color, fontSize: size }]}>🏠</Text>
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={focused ? 'home' : 'home-outline'}
+              size={size}
+              color={color}
+            />
           ),
         }}
         listeners={{
@@ -149,8 +157,12 @@ const MainTabs: React.FC = () => {
         component={TrashStackNavigator}
         options={{
           tabBarLabel: 'Trash',
-          tabBarIcon: ({ color, size }) => (
-            <Text style={[styles.tabIcon, { color, fontSize: size }]}>🗑️</Text>
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={focused ? 'trash' : 'trash-outline'}
+              size={size}
+              color={color}
+            />
           ),
           tabBarBadge:
             trashedItems.length > 0 ? trashedItems.length : undefined,
@@ -242,21 +254,9 @@ const App: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  tabBar: {
-    backgroundColor: '#ffffff',
-    borderTopWidth: 1,
-    borderTopColor: '#e9ecef',
-    paddingBottom: 4,
-    paddingTop: 4,
-    height: 60,
-  },
-  tabBarLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  tabIcon: {
-    marginBottom: 4,
+  // Screens fill the whole height behind the floating tab bar
+  scene: {
+    backgroundColor: colors.ink,
   },
 });
 

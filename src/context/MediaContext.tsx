@@ -299,7 +299,7 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
     const checkCooldownReset = () => {
       // If blocked, check if 15 minutes have passed since lastResetTime
       if (viewingLimits.isBlocked && viewingLimits.lastResetTime) {
-        const cooldownDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
+        const cooldownDuration = getViewingConfig().cooldownMinutes * 60 * 1000;
         const resetTime = viewingLimits.lastResetTime + cooldownDuration;
         const now = Date.now();
 
@@ -452,7 +452,8 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
 
         // Check if blocked and if 15-minute cooldown has expired
         if (limits.isBlocked && limits.lastResetTime) {
-          const cooldownDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
+          const cooldownDuration =
+            getViewingConfig().cooldownMinutes * 60 * 1000;
           const resetTime = limits.lastResetTime + cooldownDuration;
           const now = Date.now();
 
@@ -911,7 +912,8 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   // Deletion goes through the item's real URI: `ph://…` on iOS, `content://…` on
   // Android. Only legacy ids from the CameraRoll scanner embed the URI plus an index.
   const deletableUri = (item: MediaItem): string => {
-    if (/^(ph|content|file|assets-library):\/\//.test(item.uri)) return item.uri;
+    if (/^(ph|content|file|assets-library):\/\//.test(item.uri))
+      return item.uri;
     const legacy = item.id.replace(/\d+$/, '');
     return legacy || item.uri;
   };
@@ -1070,7 +1072,7 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   const getRemainingCooldownTime = () => {
     // If blocked, calculate 15 minutes from lastResetTime
     if (viewingLimits.isBlocked && viewingLimits.lastResetTime) {
-      const cooldownDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
+      const cooldownDuration = getViewingConfig().cooldownMinutes * 60 * 1000;
       const resetTime = viewingLimits.lastResetTime + cooldownDuration;
       const remaining = resetTime - Date.now();
       return Math.max(0, remaining);
@@ -1144,7 +1146,9 @@ export const MediaProvider: React.FC<MediaProviderProps> = ({ children }) => {
   };
 
   // Viewed media tracking methods
-  const markMediaItemAsViewedMethod = async (itemId: string): Promise<boolean> => {
+  const markMediaItemAsViewedMethod = async (
+    itemId: string,
+  ): Promise<boolean> => {
     return markItemAsViewed(itemId);
   };
 

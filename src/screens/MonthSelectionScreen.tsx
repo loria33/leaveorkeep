@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { TAB_BAR_CLEARANCE_STATIC } from '../theme';
 import {
   View,
   Text,
@@ -782,7 +783,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     paddingHorizontal: 20,
     paddingTop: 24,
-    paddingBottom: 80,
+    paddingBottom: TAB_BAR_CLEARANCE_STATIC,
   },
   title: {
     color: '#000',

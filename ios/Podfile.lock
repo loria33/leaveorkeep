@@ -19,19 +19,19 @@ PODS:
   - hermes-engine (250829098.0.17):
     - hermes-engine/Pre-built (= 250829098.0.17)
   - hermes-engine/Pre-built (250829098.0.17)
-  - libwebp (1.5.0):
-    - libwebp/demux (= 1.5.0)
-    - libwebp/mux (= 1.5.0)
-    - libwebp/sharpyuv (= 1.5.0)
-    - libwebp/webp (= 1.5.0)
-  - libwebp/demux (1.5.0):
+  - libwebp (1.6.0):
+    - libwebp/demux (= 1.6.0)
+    - libwebp/mux (= 1.6.0)
+    - libwebp/sharpyuv (= 1.6.0)
+    - libwebp/webp (= 1.6.0)
+  - libwebp/demux (1.6.0):
     - libwebp/webp
-  - libwebp/mux (1.5.0):
+  - libwebp/mux (1.6.0):
     - libwebp/demux
-  - libwebp/sharpyuv (1.5.0)
-  - libwebp/webp (1.5.0):
+  - libwebp/sharpyuv (1.6.0)
+  - libwebp/webp (1.6.0):
     - libwebp/sharpyuv
-  - LiquidGlass (0.8.1):
+  - LiquidGlass (0.8.2):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -53,10 +53,10 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - NitroIap (16.5.0):
+  - NitroIap (16.7.3):
     - hermes-engine
     - NitroModules
-    - openiap (= 3.4.0)
+    - openiap (= 3.6.1)
     - RCTRequired
     - RCTTypeSafety
     - React-bridging
@@ -106,7 +106,7 @@ PODS:
     - onnxruntime-objc/Core (= 1.20.0)
   - onnxruntime-objc/Core (1.20.0):
     - onnxruntime-c (= 1.20.0)
-  - openiap (3.4.0)
+  - openiap (3.6.1)
   - RCT-Folly (2024.11.18.00):
     - RCT-Folly/Default (= 2024.11.18.00)
     - ReactNativeDependencies
@@ -1361,33 +1361,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-netinfo (11.4.1):
-    - React-Core
-  - react-native-safe-area-context (5.9.1):
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
-    - React-bridging
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - react-native-safe-area-context/common (= 5.9.1)
-    - react-native-safe-area-context/fabric (= 5.9.1)
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - Yoga
-  - react-native-safe-area-context/common (5.9.1):
+  - react-native-netinfo (11.5.2):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1409,7 +1383,53 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-safe-area-context/fabric (5.9.1):
+  - react-native-safe-area-context (5.10.1):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-bridging
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - react-native-safe-area-context/common (= 5.10.1)
+    - react-native-safe-area-context/fabric (= 5.10.1)
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - react-native-safe-area-context/common (5.10.1):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-bridging
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - react-native-safe-area-context/fabric (5.10.1):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1432,7 +1452,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-video (6.19.2):
+  - react-native-video (6.19.3):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1445,7 +1465,7 @@ PODS:
     - React-graphics
     - React-ImageManager
     - React-jsi
-    - react-native-video/Video (= 6.19.2)
+    - react-native-video/Video (= 6.19.3)
     - React-NativeModulesApple
     - React-RCTFabric
     - React-renderercss
@@ -1455,7 +1475,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-video/Fabric (6.19.2):
+  - react-native-video/Fabric (6.19.3):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1477,7 +1497,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-video/Video (6.19.2):
+  - react-native-video/Video (6.19.3):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1882,13 +1902,14 @@ PODS:
     - Yoga
   - RNDeviceInfo (14.1.1):
     - React-Core
-  - RNFastImage (8.6.3):
+  - RNFastImage (8.31.2):
     - React-Core
-    - SDWebImage (~> 5.11.1)
-    - SDWebImageWebPCoder (~> 0.8.4)
+    - SDWebImage (< 6.0, >= 5.11.1)
+    - SDWebImagePhotosPlugin (< 2.0, >= 1.2.0)
+    - SDWebImageWebPCoder (< 1.0, >= 0.8.4)
   - RNFS (2.20.0):
     - React-Core
-  - RNGestureHandler (3.2.1):
+  - RNGestureHandler (3.3.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1934,7 +1955,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - RNPermissions (5.6.1):
+  - RNPermissions (5.6.2):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1978,7 +1999,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - RNScreens (4.27.0):
+  - RNScreens (4.29.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2000,9 +2021,9 @@ PODS:
     - ReactCodegen
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
-    - RNScreens/common (= 4.27.0)
+    - RNScreens/common (= 4.29.0)
     - Yoga
-  - RNScreens/common (4.27.0):
+  - RNScreens/common (4.29.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2025,7 +2046,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - RNShare (12.1.0):
+  - RNShare (12.3.1):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2047,7 +2068,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - RNVectorIcons (10.2.0):
+  - RNVectorIcons (10.3.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2069,15 +2090,17 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - SDWebImage (5.11.1):
-    - SDWebImage/Core (= 5.11.1)
-  - SDWebImage/Core (5.11.1)
-  - SDWebImageWebPCoder (0.8.5):
-    - libwebp (~> 1.0)
+  - SDWebImage (5.21.7):
+    - SDWebImage/Core (= 5.21.7)
+  - SDWebImage/Core (5.21.7)
+  - SDWebImagePhotosPlugin (1.2.1):
     - SDWebImage/Core (~> 5.10)
+  - SDWebImageWebPCoder (0.15.0):
+    - libwebp (~> 1.0)
+    - SDWebImage/Core (~> 5.17)
   - SocketRocket (0.7.1):
     - ReactNativeDependencies
-  - TTSRNBridge (1.0.304):
+  - TTSRNBridge (1.0.392):
     - onnxruntime-objc (~> 1.20.0)
     - React-Core
   - Yoga (0.0.0):
@@ -2200,6 +2223,7 @@ SPEC REPOS:
     - onnxruntime-objc
     - openiap
     - SDWebImage
+    - SDWebImagePhotosPlugin
     - SDWebImageWebPCoder
 
 EXTERNAL SOURCES:
@@ -2426,13 +2450,13 @@ SPEC CHECKSUMS:
   Google-Mobile-Ads-SDK: 2171620c6497804b57dc88b95644cc82e7dfb5b0
   GoogleUserMessagingPlatform: befe603da6501006420c206222acd449bba45a9c
   hermes-engine: 63c5db7d529c36335fada6582fd293ae2a105d77
-  libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
-  LiquidGlass: 2166ff7081478f18e808f342de3af01fb9145965
-  NitroIap: 8ab5d52f4f9059816be420e51eb084003f265591
+  libwebp: af5937a13536ef73f3784d69cc342b98961acf33
+  LiquidGlass: 6a02d243f112a69cb17aae5aed09db5835fd025f
+  NitroIap: ff988e56a79e06dd94b3dc2c3b8a52fe66d8b54d
   NitroModules: b47e44a0d6f78aae0bf6aafa13dafccdc0354cc3
   onnxruntime-c: 07cfff40dda7e1c54a4350bb2ad226c63150fce3
   onnxruntime-objc: b22c5d4517e9804e47c66f1f122ec4a6aa923f86
-  openiap: 253070b2afe71078a2cae63a2b8e282bdd44a059
+  openiap: 61db7eea7c194ffa5c9094e4930b970318fa6838
   RCT-Folly: 82921e585c0400eda46fac1068297aa9dfb035e4
   RCTDeprecation: 5cc865306ce4974b7a57ddbc575fd1f3fef41957
   RCTRequired: ea6f2c41f2670961ce9a48a4bf17a190dd53e493
@@ -2474,9 +2498,9 @@ SPEC CHECKSUMS:
   React-microtasksnativemodule: 269f81deee27a2a9bedb6b2d1088c1ae93de9bd3
   React-mutationobservernativemodule: 877e9f730e0d8175c2e952901b55c170fc3d372f
   react-native-cameraroll: 8de502febd3b1008249ad131245537153b18bcde
-  react-native-netinfo: cec9c4e86083cb5b6aba0e0711f563e2fbbff187
-  react-native-safe-area-context: f17f4ec987ecdd130820a4a850498b874fb70388
-  react-native-video: a15af3d54cbf5087c5e93b17cdaf24dc84f970b5
+  react-native-netinfo: ff9845b0f2674d714088f27de4a893d6e8c530b8
+  react-native-safe-area-context: f2bf5d3db254014a48910436c4a58ab0c4e2fe1f
+  react-native-video: 60ae0731a9603d2ac0867f64724b752c68ea9460
   React-NativeModulesApple: adb1dd8361dff80e9f6652fb3fdbf033cfbe2a89
   React-networking: c00b437c4408f0640ba0d4158357133488521eca
   React-oscompat: 3175a287dd7175d1a20fdce5048a4b9e11f4b915
@@ -2515,21 +2539,22 @@ SPEC CHECKSUMS:
   ReactNativeDependencies: 94c922c39e0e6150ee9ad05e2ca1946e0ef55783
   RNCAsyncStorage: 2f5e3ddbfb3d3168345311b25fb3c470edf36d9d
   RNDeviceInfo: bcce8752b5043a623fe3c26789679b473f705d3c
-  RNFastImage: 462a183c4b0b6b26fdfd639e1ed6ba37536c3b87
+  RNFastImage: 4bbf05dbc6c7d3b67f228da909421dc3ddfd3cd3
   RNFS: 89de7d7f4c0f6bafa05343c578f61118c8282ed8
-  RNGestureHandler: 63727d42f0b6ea951168615f8af3160ad7b57a57
+  RNGestureHandler: f1976ee206660832241a6802c866bc4b019be94d
   RNGoogleMobileAds: e367496b09f6d3a3755d9907f34679eef65f2d35
-  RNPermissions: d185a7818e71ec72c33c56eee62ca3b1975daffd
+  RNPermissions: e967c007a9e85ca0d86d1a22370727438c047e2b
   RNReactNativeHapticFeedback: 7f0e5435fa5153de77f2e61796cbbba5eb131a87
-  RNScreens: 0135deb65b65d207ee6294d0baf06681e1071d93
-  RNShare: 38cff312f1bb0aacefedcb0cbdf6fd7c761645d0
-  RNVectorIcons: 0217fc398497d922836f26b09582a423f0708890
-  SDWebImage: a7f831e1a65eb5e285e3fb046a23fcfbf08e696d
-  SDWebImageWebPCoder: 908b83b6adda48effe7667cd2b7f78c897e5111d
+  RNScreens: 537bf8e0197f2831adcb2b87c15f6dc097799f0f
+  RNShare: 17b29dee409f837fad3971a41e6fed5c929e1dab
+  RNVectorIcons: 4f353aed7dde2ecfc77da4130afce046d147ae8a
+  SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
+  SDWebImagePhotosPlugin: aaf5bc35fd49b66876de58c33eeb6e38b50920e5
+  SDWebImageWebPCoder: 0e06e365080397465cc73a7a9b472d8a3bd0f377
   SocketRocket: 37aec555668fb852ec12e3c0de59a86ca58f0871
-  TTSRNBridge: 0f7dbc359d5cef6fc1ff8bbe57b483905f27e7df
+  TTSRNBridge: f84cd50b4f66e69259b3d8f0aa3219362c273e20
   Yoga: d1c536142c5ff8ec8cd856ab2a7c227a1d875c8e
 
-PODFILE CHECKSUM: d0c2c0d60bc53f6e17b3d5de494a81367c72e3a0
+PODFILE CHECKSUM: c0e1040e319b397fb0e875a7b5c8dea32988b251
 
 COCOAPODS: 1.17.0

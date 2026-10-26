@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { TAB_BAR_CLEARANCE_STATIC } from '../theme';
 import {
   View,
   Text,
@@ -366,7 +367,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     paddingHorizontal: GRID_PADDING,
-    paddingBottom: 32,
+    paddingBottom: TAB_BAR_CLEARANCE_STATIC,
   },
   sectionHeader: {
     flexDirection: 'row',

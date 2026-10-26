@@ -39,10 +39,14 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>This app requires microphone access in order to command swipes.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>KeepFlick needs access to save processed media files to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>KeepFlick needs access to your photo library to help you organize and clean up your media files.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>KeepFlick uses speech recognition to allow you to control media navigation with voice commands like "keep" and "trash".</string>
 	<key>NSUserTrackingUsageDescription</key>
 	<string>This app uses tracking to provide personalized ads and improve your experience.</string>
 	<key>RCTNewArchEnabled</key>
@@ -370,12 +374,35 @@
 			<string>zq492l623r.skadnetwork</string>
 		</dict>
 	</array>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Ionicons.ttf</string>
+	</array>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
 	</array>
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -386,12 +413,6 @@
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 	</array>
-	<key>UIRequiresFullScreen</key>
-	<true/>
-	<key>NSMicrophoneUsageDescription</key>
-    <string>This app requires microphone access in order to command swipes.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>KeepFlick uses speech recognition to allow you to control media navigation with voice commands like "keep" and "trash".</string>
 	<key>UISupportsMultipleScenes</key>
 	<false/>
 	<key>UIViewControllerBasedStatusBarAppearance</key>

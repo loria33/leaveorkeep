@@ -6,10 +6,13 @@ import AVFoundation
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
+  // Assigned by SceneDelegate once the window scene connects; kept so libraries that still
+  // read `UIApplication.shared.delegate?.window` keep working.
   var window: UIWindow?
 
   var reactNativeDelegate: ReactNativeDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
+  var launchOptions: [UIApplication.LaunchOptionsKey: Any]?
 
   func application(
     _ application: UIApplication,
@@ -28,23 +31,33 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     } catch {
       print("Failed to configure audio session: \(error)")
     }
-    
+
     let delegate = ReactNativeDelegate()
     let factory = RCTReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
 
     reactNativeDelegate = delegate
     reactNativeFactory = factory
+    self.launchOptions = launchOptions
 
-    window = UIWindow(frame: UIScreen.main.bounds)
-
-    factory.startReactNative(
-      withModuleName: "leaveMkeepM",
-      in: window,
-      launchOptions: launchOptions
-    )
-
+    // The UIWindow and the React Native root view are created in SceneDelegate
+    // (UIScene life cycle is mandatory for apps built with the iOS 27 SDK).
     return true
+  }
+
+  // MARK: - UIScene life cycle
+
+  func application(
+    _ application: UIApplication,
+    configurationForConnecting connectingSceneSession: UISceneSession,
+    options: UIScene.ConnectionOptions
+  ) -> UISceneConfiguration {
+    let configuration = UISceneConfiguration(
+      name: "Default Configuration",
+      sessionRole: connectingSceneSession.role
+    )
+    configuration.delegateClass = SceneDelegate.self
+    return configuration
   }
 }
 

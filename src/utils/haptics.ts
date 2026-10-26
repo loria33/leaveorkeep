@@ -5,7 +5,9 @@ const OPTIONS = {
   ignoreAndroidSystemSettings: false,
 };
 
-const trigger = (type: 'impactLight' | 'impactHeavy') => {
+type HapticType = 'impactLight' | 'impactHeavy' | 'notificationSuccess';
+
+const trigger = (type: HapticType) => {
   try {
     ReactNativeHapticFeedback.trigger(type, OPTIONS);
   } catch {
@@ -18,3 +20,9 @@ export const hapticKeep = () => trigger('impactLight');
 
 /** Heavier thud confirming a "flick" (trash) voice command */
 export const hapticFlick = () => trigger('impactHeavy');
+
+/** Light tap acknowledging a button press */
+export const hapticTap = () => trigger('impactLight');
+
+/** Celebratory buzz for a completed purchase */
+export const hapticSuccess = () => trigger('notificationSuccess');

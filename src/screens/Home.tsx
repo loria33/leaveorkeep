@@ -11,13 +11,16 @@ import {
   Alert,
   TouchableOpacity,
   Image,
-  ImageBackground,
   Platform,
-  PlatformColor,
   Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import {
+  ParamListBase,
+  useFocusEffect,
+  useNavigation,
+} from '@react-navigation/native';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MediaViewerScreenParams } from './MediaViewerScreen';
 import { MonthSelectionScreenParams } from './MonthSelectionScreen';
@@ -39,22 +42,31 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMedia, MediaItem } from '../context/MediaContext';
 import { useAdmin } from '../context/adminContext';
 import MediaViewer from '../components/MediaViewer';
+import ScreenBackground from '../components/ScreenBackground';
+import UpgradeSheet from '../components/UpgradeSheet';
 import { checkMediaPermissionsWithRetry } from '../utils/permissions';
 import { getViewingConfig } from '../constants/app';
+import { getViewBudget } from '../utils/viewBudget';
+import { hapticTap } from '../utils/haptics';
+import {
+  colors,
+  getSkinTheme,
+  getTabBarClearance,
+  monthTints,
+  MONTH_ABBREVIATIONS,
+} from '../theme';
 import {
   loadViewedItems,
   getLastViewedItemId,
 } from '../utils/viewedMediaTracker';
 
 const MONTH_FILTER_OPTIONS = [
-  { key: 'all', label: 'Show all' },
-  { key: 'needToFinish', label: 'Need to finish' },
+  { key: 'all', label: 'All' },
+  { key: 'needToFinish', label: 'In progress' },
   { key: 'notStarted', label: 'Not started' },
 ] as const;
 
-const backgroundImagePink = require('../assets/bg.png');
-const backgroundImageBlue = require('../assets/bg2.jpg');
-const keepFlickIcon = require('../assets/kf.png');
+const keepFlickMark = require('../assets/kf-mark.png');
 
 // Unified 4-color pastel palette (Light Blue, Light Purple, Light Teal, Light Pink)
 const gradientPalette = {
@@ -65,13 +77,6 @@ const gradientPalette = {
   frostyBlue: ['#B0E0E6', '#E0F6FF'], // Frosty blue for pink theme when liquid glass is unavailable
   frostyPink: ['#FFC0CB', '#FFE4E9'], // Frosty pink for blue theme when liquid glass is unavailable
 };
-
-const monthGradients = [
-  gradientPalette.lightBlue,
-  gradientPalette.lightPurple,
-  gradientPalette.lightTeal,
-  gradientPalette.lightPink,
-];
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -253,6 +258,14 @@ const Home: React.FC = () => {
     'all' | 'needToFinish' | 'notStarted'
   >('all');
   const [skin, setSkin] = useState<'pink' | 'blue'>('blue');
+  const [upgradeSheetVisible, setUpgradeSheetVisible] = useState(false);
+
+  // The inline viewer is immersive: hide the floating tab bar while it is open
+  useEffect(() => {
+    navigation
+      .getParent<BottomTabNavigationProp<ParamListBase>>()
+      ?.setOptions({ tabBarStyle: viewerVisible ? { display: 'none' } : {} });
+  }, [navigation, viewerVisible]);
 
   // Cache viewed items Set for performance (avoid reloading on every check)
   const viewedItemsCacheRef = useRef<Set<string> | null>(null);
@@ -597,6 +610,19 @@ const Home: React.FC = () => {
     setSkin(newSkin);
     await AsyncStorage.setItem('skin', newSkin);
   };
+
+  const handleOpenUpgradeSheet = () => {
+    hapticTap();
+    setUpgradeSheetVisible(true);
+  };
+
+  // Drives the header badge: wording, colour and fill level of the free-view budget
+  const viewBudget = getViewBudget(
+    viewingLimits.remainingViews,
+    getViewingConfig().maxViews,
+    viewingLimits.isBlocked,
+  );
+  const theme = getSkinTheme(skin);
 
   const handleHideTimeFilters = async () => {
     const newValue = !hideTimeFilters;
@@ -1017,47 +1043,44 @@ const Home: React.FC = () => {
 
   if (!hasPermission) {
     return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" />
-        <View style={styles.permissionContainer}>
-          <View style={styles.permissionContent}>
-            <Text style={styles.permissionIcon}>📱</Text>
-            <Text
-              style={[
-                styles.permissionTitle,
-                skin === 'blue' && { color: '#ffffff' },
-              ]}
-            >
-              Media Access Required
-            </Text>
-            <Text
-              style={[
-                styles.permissionText,
-                skin === 'blue' && { color: 'rgba(255, 255, 255, 0.9)' },
-              ]}
-            >
-              Please grant media permissions to start organizing your photos.
-            </Text>
-            {Platform.OS === 'ios' && (
-              <Text
-                style={[
-                  styles.permissionSubtext,
-                  skin === 'blue' && { color: 'rgba(255, 255, 255, 0.8)' },
-                ]}
-              >
-                On iPad, you may need to retry if you've already granted
-                permission.
+      <ScreenBackground skin={skin}>
+        <SafeAreaView style={styles.container}>
+          <StatusBar barStyle="light-content" />
+          <View style={styles.permissionContainer}>
+            <View style={styles.permissionContent}>
+              <View style={styles.stateIconWrap}>
+                <Text style={styles.stateIcon}>📱</Text>
+              </View>
+              <Text style={styles.permissionTitle}>Media access needed</Text>
+              <Text style={styles.permissionText}>
+                Allow photo access so KeepFlick can organize your library month
+                by month.
               </Text>
-            )}
-            <TouchableOpacity
-              style={styles.retryButton}
-              onPress={handleRetryPermissions}
-            >
-              <Text style={styles.retryButtonText}>Retry Permissions</Text>
-            </TouchableOpacity>
+              {Platform.OS === 'ios' && (
+                <Text style={styles.permissionSubtext}>
+                  On iPad, you may need to retry if you've already granted
+                  permission.
+                </Text>
+              )}
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  { backgroundColor: theme.accent },
+                ]}
+                onPress={handleRetryPermissions}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+              >
+                <Text
+                  style={[styles.primaryButtonText, { color: theme.accentInk }]}
+                >
+                  Allow access
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </SafeAreaView>
+        </SafeAreaView>
+      </ScreenBackground>
     );
   }
 
@@ -1082,27 +1105,20 @@ const Home: React.FC = () => {
 
     return (
       <View style={styles.scanProgressContainer}>
-        <Text
-          style={[
-            styles.scanProgressText,
-            skin === 'blue' && { color: '#ffffff' },
-          ]}
-        >
-          {phaseText}
-        </Text>
+        <View style={styles.scanProgressHeader}>
+          <Text style={styles.scanProgressText}>{phaseText}</Text>
+          <Text style={styles.scanProgressCounter}>
+            {current} / {total} · {percentage}%
+          </Text>
+        </View>
         <View style={styles.scanProgressBar}>
           <View
-            style={[styles.scanProgressFill, { width: `${percentage}%` }]}
+            style={[
+              styles.scanProgressFill,
+              { width: `${percentage}%`, backgroundColor: theme.accent },
+            ]}
           />
         </View>
-        <Text
-          style={[
-            styles.scanProgressCounter,
-            skin === 'blue' && { color: 'rgba(255, 255, 255, 0.8)' },
-          ]}
-        >
-          {current} / {total} ({percentage}%)
-        </Text>
       </View>
     );
   };
@@ -1165,88 +1181,119 @@ const Home: React.FC = () => {
     }
   }
 
-  const backgroundImage =
-    skin === 'blue' ? backgroundImageBlue : backgroundImagePink;
-
-  // Android has no liquid glass and renders elevation shadows on translucent
-  // views as a solid fill, so the filter cards get flat, theme-aware styles.
-  const androidFilterStyles =
-    Platform.OS === 'android'
-      ? skin === 'blue'
-        ? {
-            card: styles.monthFilterCardAndroidBlue,
-            cardActive: styles.monthFilterCardAndroidBlueActive,
-            text: styles.monthFilterCardTextAndroidBlue,
-            textActive: styles.monthFilterCardTextAndroidBlueActive,
-          }
-        : {
-            card: styles.monthFilterCardAndroidPink,
-            cardActive: styles.monthFilterCardAndroidPinkActive,
-            text: styles.monthFilterCardTextAndroidPink,
-            textActive: styles.monthFilterCardTextAndroidPinkActive,
-          }
-      : null;
+  const totalItems = monthSummaries.reduce(
+    (sum, summary) => sum + (summary.totalCount || 0),
+    0,
+  );
 
   return (
-    <ImageBackground
-      source={backgroundImage}
-      style={styles.backgroundImage}
-      resizeMode="cover"
-    >
-      {skin === 'blue' && <View style={styles.blueTintOverlay} />}
+    <ScreenBackground skin={skin}>
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" />
 
-        {/* Enhanced Header */}
+        {/* Header */}
         <View style={styles.headerContainer}>
           <View style={styles.header}>
-            <View style={styles.headerInfo}>
+            <View style={styles.brandRow}>
               <Image
-                source={keepFlickIcon}
-                style={styles.headerIcon}
+                source={keepFlickMark}
+                style={styles.brandMark}
                 resizeMode="contain"
               />
+              <View style={styles.brandText}>
+                <Text style={styles.brandName}>KeepFlick</Text>
+                {monthSummaries.length > 0 && (
+                  <Text style={styles.brandSubtitle} numberOfLines={1}>
+                    {monthSummaries.length}{' '}
+                    {monthSummaries.length === 1 ? 'month' : 'months'}
+                    {totalItems > 0 &&
+                      ` · ${totalItems.toLocaleString()} items`}
+                  </Text>
+                )}
+              </View>
             </View>
             <View style={styles.rightSection}>
               <TouchableOpacity
                 style={[
-                  styles.themeToggleButton,
-                  skin === 'pink'
-                    ? { backgroundColor: '#4A90E2' }
-                    : { backgroundColor: '#FFB3C1' },
+                  styles.glassPill,
+                  isSmallScreen && styles.glassPillCompact,
                 ]}
                 onPress={handleToggleTheme}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Theme: ${skin}. Switch theme`}
               >
-                <Text style={styles.themeToggleText}>Theme</Text>
+                <View
+                  style={[styles.themeDot, { backgroundColor: theme.accent }]}
+                />
+                {!isSmallScreen && (
+                  <Text style={styles.glassPillText}>Theme</Text>
+                )}
               </TouchableOpacity>
               {!isSmallScreen && (
                 <TouchableOpacity
-                  style={styles.refreshButton}
+                  style={styles.glassIconButton}
                   onPress={handleRefresh}
                   disabled={isLoading}
+                  accessibilityRole="button"
+                  accessibilityLabel="Rescan library"
                 >
-                  <Text style={styles.refreshButtonText}>
+                  <Text style={styles.glassIconText}>
                     {isLoading ? '⟳' : '↻'}
                   </Text>
                 </TouchableOpacity>
               )}
               {!isPremiumUser && (
-                <View
+                <TouchableOpacity
                   style={[
                     styles.viewingLimitsBadge,
                     isSmallScreen && styles.viewingLimitsBadgeMobile,
+                    {
+                      backgroundColor: viewBudget.background,
+                      borderColor: viewBudget.border,
+                    },
                   ]}
+                  onPress={handleOpenUpgradeSheet}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${viewBudget.label}. Upgrade to Premium for unlimited views`}
+                  accessibilityHint="Opens upgrade options"
+                  testID="viewing-limits-badge"
                 >
-                  <Text
-                    style={[
-                      styles.viewingLimitsText,
-                      isSmallScreen && styles.viewingLimitsTextMobile,
-                    ]}
-                  >
-                    {viewingLimits.remainingViews} views left
-                  </Text>
-                </View>
+                  <View style={styles.viewingLimitsRow}>
+                    <Text
+                      style={[
+                        styles.viewingLimitsText,
+                        isSmallScreen && styles.viewingLimitsTextMobile,
+                        {
+                          color: viewBudget.color,
+                          textShadowColor: viewBudget.border,
+                        },
+                      ]}
+                    >
+                      {viewBudget.label}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.viewingLimitsChevron,
+                        { color: viewBudget.color },
+                      ]}
+                    >
+                      ›
+                    </Text>
+                  </View>
+                  <View style={styles.viewingLimitsTrack}>
+                    <View
+                      style={[
+                        styles.viewingLimitsFill,
+                        {
+                          width: `${Math.round(viewBudget.fraction * 100)}%`,
+                          backgroundColor: viewBudget.color,
+                        },
+                      ]}
+                    />
+                  </View>
+                </TouchableOpacity>
               )}
             </View>
           </View>
@@ -1259,39 +1306,22 @@ const Home: React.FC = () => {
         {isLoading && monthSummaries.length === 0 ? (
           <View style={styles.loadingContainer}>
             <View style={styles.loadingContent}>
-              <ActivityIndicator
-                size="large"
-                color={skin === 'blue' ? '#ffffff' : '#1a1a1a'}
-              />
-              <Text
-                style={[
-                  styles.loadingText,
-                  skin === 'blue' && { color: '#ffffff' },
-                ]}
-              >
-                Scanning your photos...
+              <ActivityIndicator size="large" color={theme.accent} />
+              <Text style={styles.loadingText}>Scanning your library…</Text>
+              <Text style={styles.loadingHint}>
+                This only takes a moment the first time.
               </Text>
             </View>
           </View>
         ) : monthSummaries.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyContent}>
-              <Text style={styles.emptyIcon}>📸</Text>
-              <Text
-                style={[
-                  styles.emptyTitle,
-                  skin === 'blue' && { color: '#ffffff' },
-                ]}
-              >
-                No Media Found
-              </Text>
-              <Text
-                style={[
-                  styles.emptyText,
-                  skin === 'blue' && { color: 'rgba(255, 255, 255, 0.9)' },
-                ]}
-              >
-                No media found on your device
+              <View style={styles.stateIconWrap}>
+                <Text style={styles.stateIcon}>📸</Text>
+              </View>
+              <Text style={styles.emptyTitle}>Nothing here yet</Text>
+              <Text style={styles.emptyText}>
+                No photos or videos were found on this device.
               </Text>
             </View>
           </View>
@@ -1484,30 +1514,28 @@ const Home: React.FC = () => {
                 </View>
               )}
 
-              {/* Month Filter Cards */}
-              <View style={styles.monthFilterCardsContainer}>
+              {/* Month filter: segmented control */}
+              <View style={styles.segmented}>
                 {MONTH_FILTER_OPTIONS.map(({ key, label }) => {
                   const isActive = monthFilter === key;
                   return (
                     <TouchableOpacity
                       key={key}
                       style={[
-                        styles.monthFilterCard,
-                        isActive && styles.monthFilterCardActive,
-                        androidFilterStyles?.card,
-                        isActive && androidFilterStyles?.cardActive,
+                        styles.segment,
+                        isActive && { backgroundColor: theme.accent },
                       ]}
                       onPress={() => setMonthFilter(key)}
-                      activeOpacity={0.7}
+                      activeOpacity={0.8}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isActive }}
                     >
                       <Text
                         style={[
-                          styles.monthFilterCardText,
-                          isActive && styles.monthFilterCardTextActive,
-                          skin === 'blue' && { color: '#ffffff' },
-                          androidFilterStyles?.text,
-                          isActive && androidFilterStyles?.textActive,
+                          styles.segmentText,
+                          isActive && { color: theme.accentInk },
                         ]}
+                        numberOfLines={1}
                       >
                         {label}
                       </Text>
@@ -1537,138 +1565,132 @@ const Home: React.FC = () => {
 
                   return true;
                 })
-                .map(summary => {
-                  const count = summary.totalCount || 0;
-                  // Find original index in monthSummaries for gradient color
-                  const originalIndex = monthSummaries.findIndex(
-                    m => m.monthKey === summary.monthKey,
-                  );
-                  // Use frosty colors for all months when liquid glass is unavailable
-                  // Pink theme -> frosty blue, Blue theme -> frosty pink
-                  const gradientColors =
-                    !isLiquidGlassSupported && skin === 'pink'
-                      ? gradientPalette.frostyBlue
-                      : !isLiquidGlassSupported && skin === 'blue'
-                      ? gradientPalette.frostyPink
-                      : monthGradients[originalIndex % monthGradients.length];
-                  const isCompleted = monthCompletionStatus[summary.monthKey];
+                .map((summary, visibleIndex) => {
+                  const isCompleted = !!monthCompletionStatus[summary.monthKey];
                   const progress = monthViewingProgress[summary.monthKey];
                   const showProgress =
-                    progress?.started && !isCompleted && progress.remaining > 0;
+                    !!progress &&
+                    progress.started &&
+                    !isCompleted &&
+                    progress.remaining > 0;
+                  const viewedFraction =
+                    showProgress && progress.total > 0
+                      ? Math.min(1, progress.viewed / progress.total)
+                      : 0;
+                  const tint = monthTints[visibleIndex % monthTints.length];
+                  const [yearText, monthText] = summary.monthKey.split('-');
+                  const abbreviation =
+                    MONTH_ABBREVIATIONS[Number(monthText) - 1] ?? '';
+                  const totalCount = summary.totalCount || 0;
+                  const photoCount = summary.photoCount || 0;
+                  const videoCount = summary.videoCount || 0;
+                  // Counts are placeholders (0) until the scanner has visited the month
+                  const hasCounts = totalCount > 0;
+                  const countsLabel = `${photoCount.toLocaleString()} ${
+                    photoCount === 1 ? 'photo' : 'photos'
+                  } · ${videoCount.toLocaleString()} ${
+                    videoCount === 1 ? 'video' : 'videos'
+                  }`;
+                  let subtitle: string;
+                  if (isCompleted) {
+                    subtitle = hasCounts
+                      ? `All done · ${totalCount.toLocaleString()} items`
+                      : 'All done';
+                  } else if (showProgress) {
+                    subtitle = `${progress.remaining.toLocaleString()} left of ${progress.total.toLocaleString()}`;
+                  } else {
+                    subtitle = hasCounts ? countsLabel : 'Not started';
+                  }
+
+                  const cardContent = (
+                    <View style={styles.monthCardContent}>
+                      <View
+                        style={[styles.monthTile, { backgroundColor: tint.bg }]}
+                      >
+                        <Text
+                          style={[styles.monthTileMonth, { color: tint.fg }]}
+                        >
+                          {abbreviation}
+                        </Text>
+                        <Text style={styles.monthTileYear}>{yearText}</Text>
+                      </View>
+                      <View style={styles.monthInfo}>
+                        <Text style={styles.monthTitle} numberOfLines={1}>
+                          {summary.monthName}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.monthSubtitle,
+                            isCompleted && { color: theme.accent },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {subtitle}
+                        </Text>
+                        {showProgress && (
+                          <View style={styles.monthProgressTrack}>
+                            <View
+                              style={[
+                                styles.monthProgressFill,
+                                {
+                                  width: `${Math.round(viewedFraction * 100)}%`,
+                                  backgroundColor: theme.accent,
+                                },
+                              ]}
+                            />
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.monthRight}>
+                        {isCompleted ? (
+                          <View
+                            style={[
+                              styles.doneBadge,
+                              { borderColor: theme.accent },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.doneBadgeText,
+                                { color: theme.accent },
+                              ]}
+                            >
+                              ✓
+                            </Text>
+                          </View>
+                        ) : (
+                          <Text style={styles.monthChevron}>›</Text>
+                        )}
+                      </View>
+                    </View>
+                  );
 
                   return (
                     <TouchableOpacity
                       key={`${summary.monthKey}-${statusLoaded}`}
                       style={styles.monthCard}
                       onPress={() => handleMonthPress(summary.monthKey)}
+                      activeOpacity={0.8}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${summary.monthName}. ${subtitle}`}
                     >
                       {isLiquidGlassSupported ? (
                         <LiquidGlassView
-                          style={styles.monthCardGradient}
+                          style={styles.monthCardSurface}
                           interactive
                           effect="clear"
                         >
-                          <View style={styles.monthCardContent}>
-                            <View style={styles.monthInfo}>
-                              <View style={styles.monthTitleRow}>
-                                <View style={styles.monthTitleContainer}>
-                                  <Text
-                                    style={[
-                                      styles.monthTitle,
-                                      Platform.OS === 'ios' && {
-                                        color: PlatformColor('labelColor'),
-                                      },
-                                      skin === 'blue' && { color: '#ffffff' },
-                                    ]}
-                                  >
-                                    {summary.monthName}
-                                  </Text>
-                                  {isCompleted && (
-                                    <Text style={styles.completedCheckmark}>
-                                      ✓
-                                    </Text>
-                                  )}
-                                  {showProgress && (
-                                    <Text
-                                      style={[
-                                        styles.progressBadge,
-                                        skin === 'pink' &&
-                                          styles.progressBadgePink,
-                                      ]}
-                                    >
-                                      {progress.remaining} left
-                                    </Text>
-                                  )}
-                                </View>
-                              </View>
-                            </View>
-
-                            <View style={styles.monthRight}>
-                              <Text
-                                style={[
-                                  styles.monthChevron,
-                                  Platform.OS === 'ios' && {
-                                    color: PlatformColor('labelColor'),
-                                  },
-                                  skin === 'blue' && { color: '#ffffff' },
-                                ]}
-                              >
-                                ›
-                              </Text>
-                            </View>
-                          </View>
+                          {cardContent}
                         </LiquidGlassView>
                       ) : (
-                        <LinearGradient
-                          colors={gradientColors}
-                          style={styles.monthCardGradient}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 1, y: 0 }}
+                        <View
+                          style={[
+                            styles.monthCardSurface,
+                            styles.monthCardFallback,
+                          ]}
                         >
-                          <View style={styles.monthCardContent}>
-                            <View style={styles.monthInfo}>
-                              <View style={styles.monthTitleRow}>
-                                <View style={styles.monthTitleContainer}>
-                                  <Text
-                                    style={[
-                                      styles.monthTitle,
-                                      skin === 'blue' && { color: '#ffffff' },
-                                    ]}
-                                  >
-                                    {summary.monthName}
-                                  </Text>
-                                  {isCompleted && (
-                                    <Text style={styles.completedCheckmark}>
-                                      ✓
-                                    </Text>
-                                  )}
-                                  {showProgress && (
-                                    <Text
-                                      style={[
-                                        styles.progressBadge,
-                                        skin === 'pink' &&
-                                          styles.progressBadgePink,
-                                      ]}
-                                    >
-                                      {progress.remaining} left
-                                    </Text>
-                                  )}
-                                </View>
-                              </View>
-                            </View>
-
-                            <View style={styles.monthRight}>
-                              <Text
-                                style={[
-                                  styles.monthChevron,
-                                  skin === 'blue' && { color: '#ffffff' },
-                                ]}
-                              >
-                                ›
-                              </Text>
-                            </View>
-                          </View>
-                        </LinearGradient>
+                          {cardContent}
+                        </View>
                       )}
                     </TouchableOpacity>
                   );
@@ -1677,12 +1699,18 @@ const Home: React.FC = () => {
               <View
                 style={[
                   styles.bottomSpacing,
-                  { height: Math.max(insets.bottom, 32) + 60 },
+                  { height: getTabBarClearance(insets.bottom) },
                 ]}
               />
             </ScrollView>
           </View>
         )}
+
+        {/* Premium upgrade sheet, opened from the views-left badge */}
+        <UpgradeSheet
+          visible={upgradeSheetVisible}
+          onClose={() => setUpgradeSheetVisible(false)}
+        />
 
         {/* Media Viewer Modal */}
         {viewerVisible && (
@@ -1699,106 +1727,99 @@ const Home: React.FC = () => {
           />
         )}
       </SafeAreaView>
-    </ImageBackground>
+    </ScreenBackground>
   );
 };
 
 const styles = StyleSheet.create({
-  backgroundImage: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
   container: {
     flex: 1,
     backgroundColor: 'transparent',
   },
   headerContainer: {
     backgroundColor: 'transparent',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   header: {
     paddingHorizontal: 20,
-    paddingVertical: 20,
+    paddingTop: 12,
+    paddingBottom: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerInfo: {
+  brandRow: {
     flex: 1,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    minWidth: 0,
   },
-  headerTitle: {
-    fontSize: 24,
+  brandMark: {
+    width: 38,
+    height: 38,
+    marginRight: 10,
+  },
+  brandText: {
+    flexShrink: 1,
+  },
+  brandName: {
+    fontSize: 20,
     fontWeight: '800',
-    color: '#000000',
-    marginBottom: 4,
-    textDecorationLine: 'underline',
-    textDecorationColor: '#00D9FF',
-    textDecorationStyle: 'solid',
-    borderBottomWidth: 3,
-    borderBottomColor: '#00D9FF',
+    color: colors.text,
+    letterSpacing: 0.2,
   },
-  headerIcon: {
-    width: 150,
-    height: 50,
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 15,
-    color: 'rgba(0, 0, 0, 0.7)',
+  brandSubtitle: {
+    fontSize: 12,
     fontWeight: '600',
+    color: colors.textMuted,
+    marginTop: 1,
   },
   rightSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 16,
+    marginLeft: 12,
   },
-  refreshButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    paddingVertical: 8,
+  glassPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 36,
     paddingHorizontal: 12,
-    borderRadius: 10,
-    marginRight: 12,
+    borderRadius: 999,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: colors.border,
+    marginRight: 8,
   },
-  refreshButtonText: {
+  glassPillCompact: {
+    width: 36,
+    paddingHorizontal: 0,
+    justifyContent: 'center',
+  },
+  glassPillText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginLeft: 8,
+  },
+  themeDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  glassIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  glassIconText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#000000',
-  },
-  viewingLimitsBadge: {
-    backgroundColor: 'rgba(0, 217, 255, 0.2)',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 217, 255, 0.4)',
-  },
-  viewingLimitsText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#00D9FF',
-    textShadowColor: 'rgba(0, 217, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  viewingLimitsBadgeMobile: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  viewingLimitsTextMobile: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#00D9FF',
-    textShadowColor: 'rgba(0, 217, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    color: colors.textSecondary,
   },
   scrollViewContainer: {
     flex: 1,
@@ -1807,6 +1828,268 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
     backgroundColor: 'transparent',
+  },
+  segmented: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginTop: 6,
+    marginBottom: 12,
+    padding: 4,
+    borderRadius: 999,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  segment: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  monthCard: {
+    marginHorizontal: 20,
+    marginVertical: 5,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  monthCardSurface: {
+    borderRadius: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+  monthCardFallback: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  monthCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  monthTile: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  monthTileMonth: {
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  monthTileYear: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  monthInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  monthTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  monthSubtitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  monthProgressTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.surfaceRaised,
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+  monthProgressFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  monthRight: {
+    marginLeft: 12,
+  },
+  monthChevron: {
+    fontSize: 26,
+    color: colors.textMuted,
+    fontWeight: '300',
+  },
+  doneBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  doneBadgeText: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  loadingContent: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.surface,
+    paddingHorizontal: 28,
+    paddingVertical: 32,
+    borderRadius: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  loadingText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text,
+    marginTop: 18,
+    textAlign: 'center',
+  },
+  loadingHint: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyContent: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.surface,
+    paddingHorizontal: 28,
+    paddingVertical: 32,
+    borderRadius: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  stateIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.surfaceRaised,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  stateIcon: {
+    fontSize: 36,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyText: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  permissionContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  permissionContent: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.surface,
+    paddingHorizontal: 28,
+    paddingVertical: 32,
+    borderRadius: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  permissionTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  permissionText: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  permissionSubtext: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 10,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  primaryButton: {
+    alignSelf: 'stretch',
+    minHeight: 52,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 22,
+  },
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  bottomSpacing: {
+    height: 32,
+  },
+  scanProgressContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 6,
+    paddingBottom: 10,
+  },
+  scanProgressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  scanProgressText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  scanProgressCounter: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
+    fontVariant: ['tabular-nums'],
+  },
+  scanProgressBar: {
+    width: '100%',
+    height: 6,
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  scanProgressFill: {
+    height: '100%',
+    borderRadius: 3,
   },
   abstractBackground: {
     position: 'absolute',
@@ -1903,474 +2186,6 @@ const styles = StyleSheet.create({
     top: 350,
     left: SCREEN_WIDTH * 0.6,
   },
-  monthCard: {
-    marginHorizontal: 20,
-    marginVertical: 6,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 4,
-    overflow: 'hidden',
-    zIndex: 1,
-  },
-  monthCardGradient: {
-    padding: 16,
-    minHeight: 88,
-    borderRadius: 12,
-  },
-  monthCardContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  monthInfo: {
-    flex: 1,
-  },
-  monthTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  monthTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  monthTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#000000',
-  },
-  completedCheckmark: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#00FF88',
-    backgroundColor: 'rgba(0, 255, 136, 0.25)',
-    borderRadius: 12,
-    width: 26,
-    height: 26,
-    textAlign: 'center',
-    lineHeight: 22,
-    borderWidth: 2,
-    borderColor: '#00FF88',
-    overflow: 'hidden',
-    textShadowColor: 'rgba(0, 255, 136, 0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  progressBadge: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#00D9FF',
-    backgroundColor: 'rgba(0, 217, 255, 0.25)',
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderWidth: 1.5,
-    borderColor: '#00D9FF',
-    textShadowColor: 'rgba(0, 217, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  progressBadgePink: {
-    color: '#4A90E2',
-    backgroundColor: 'rgba(74, 144, 226, 0.25)',
-    borderColor: '#4A90E2',
-    textShadowColor: 'rgba(74, 144, 226, 0.5)',
-  },
-  monthCount: {
-    fontSize: 14,
-    color: '#334155',
-    fontWeight: '700',
-  },
-  monthRight: {
-    marginLeft: 16,
-  },
-  monthChevron: {
-    fontSize: 28,
-    color: '#000000',
-    fontWeight: '300',
-  },
-  monthProgressContainer: {
-    marginTop: 4,
-  },
-  monthProgressText: {
-    fontSize: 12,
-    color: '#334155',
-    fontWeight: '600',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    backgroundColor: 'transparent',
-  },
-  loadingContent: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    paddingHorizontal: 32,
-    paddingVertical: 24,
-    borderRadius: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#000000',
-    marginTop: 16,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    backgroundColor: 'transparent',
-  },
-  emptyContent: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    paddingHorizontal: 32,
-    paddingVertical: 32,
-    borderRadius: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 20,
-    opacity: 0.8,
-  },
-  emptyTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#000000',
-    marginBottom: 12,
-    textShadowColor: 'rgba(0, 217, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: 'rgba(0, 0, 0, 0.7)',
-    textAlign: 'center',
-    lineHeight: 24,
-    fontWeight: '500',
-  },
-  permissionContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    backgroundColor: 'transparent',
-  },
-  permissionContent: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    paddingHorizontal: 32,
-    paddingVertical: 32,
-    borderRadius: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  permissionIcon: {
-    fontSize: 64,
-    marginBottom: 20,
-    opacity: 0.8,
-  },
-  permissionTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#000000',
-    marginBottom: 12,
-    textShadowColor: 'rgba(0, 217, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
-  permissionText: {
-    fontSize: 16,
-    color: 'rgba(0, 0, 0, 0.7)',
-    textAlign: 'center',
-    lineHeight: 24,
-    fontWeight: '500',
-  },
-  permissionSubtext: {
-    fontSize: 14,
-    color: 'rgba(0, 0, 0, 0.7)',
-    marginTop: 10,
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  retryButton: {
-    backgroundColor: 'rgba(0, 217, 255, 0.2)',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 10,
-    marginTop: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 217, 255, 0.4)',
-  },
-  retryButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#00D9FF',
-  },
-  bottomSpacing: {
-    height: 32,
-  },
-
-  scanProgressContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  scanProgressText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000000',
-    marginBottom: 8,
-  },
-  scanProgressBar: {
-    width: '100%',
-    height: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  scanProgressFill: {
-    height: '100%',
-    backgroundColor: '#00D9FF',
-    borderRadius: 4,
-  },
-  scanProgressCounter: {
-    fontSize: 14,
-    color: 'rgba(0, 0, 0, 0.7)',
-    marginTop: 8,
-  },
-  duplicateCardsContainer: {
-    width: '100%',
-    flexDirection: 'row',
-    alignContent: 'center',
-    justifyContent: 'center',
-  },
-  // New action-style cards used in special filters
-  actionCard: {
-    borderRadius: 18,
-    overflow: 'hidden',
-    marginVertical: 8,
-  },
-  actionGradientSm: {
-    padding: 14,
-    minHeight: 68,
-    borderRadius: 18,
-  },
-  actionContentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  actionIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  actionIconLg: {
-    fontSize: 20,
-    lineHeight: 22,
-  },
-  actionTextCol: {
-    flex: 1,
-  },
-  actionTitleDark: {
-    color: '#0f172a',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  actionCountDark: {
-    color: '#334155',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  actionArrowDark: {
-    color: '#0f172a',
-    fontSize: 20,
-    fontWeight: '300',
-    marginLeft: 8,
-  },
-  duplicateCard: {
-    marginHorizontal: 20,
-    marginVertical: 6,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 4,
-    overflow: 'hidden',
-  },
-  duplicateCardHalf: {
-    width: '40%',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 4,
-    overflow: 'hidden',
-  },
-  disabledCard: {
-    opacity: 0.5,
-  },
-  duplicateCardGradient: {
-    padding: 12,
-    minHeight: 72,
-  },
-  duplicateCardContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  duplicateInfo: {
-    flex: 1,
-  },
-  duplicateTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  duplicateTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#0f172a',
-  },
-  duplicateCount: {
-    fontSize: 12,
-    color: '#334155',
-    fontWeight: '700',
-  },
-  duplicateSubtext: {
-    fontSize: 14,
-    color: '#000000',
-    marginTop: 4,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  duplicateRight: {
-    marginLeft: 16,
-  },
-  duplicateChevron: {
-    fontSize: 20,
-    color: '#0f172a',
-    fontWeight: '300',
-  },
-  timeFilterContainer: {
-    width: '100%',
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  timeFilterButton: {
-    width: '15%',
-    backgroundColor: 'rgba(245, 245, 220, 0.8)',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 245, 220, 1)',
-  },
-  timeFilterText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
-  themeToggleButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  themeToggleText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  duplicateCardsRow: {
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  hideIconButton: {
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    alignContent: 'center',
-  },
-  hideIconText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  hideButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    backgroundColor: 'transparent',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: 28,
-    minWidth: 28,
-  },
-  hideButtonText: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: 'rgba(0, 0, 0, 0.7)',
-  },
-  hideButtonTextMobile: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'rgba(0, 0, 0, 0.8)',
-  },
-  timeFilterButtonsRow: {
-    width: '80%',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: '2%',
-  },
-  sourceFilterContainer: {
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  sourceFilterButton: {
-    width: '15%',
-    backgroundColor: 'rgba(245, 245, 220, 0.8)',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 245, 220, 1)',
-  },
-  sourceFilterText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
   specialFiltersContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 20,
@@ -2415,6 +2230,26 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 14,
     fontWeight: '800',
+  },
+  hideButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: 28,
+    minWidth: 28,
+  },
+  hideButtonText: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: 'rgba(0, 0, 0, 0.7)',
+  },
+  hideButtonTextMobile: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(0, 0, 0, 0.8)',
   },
   groupCardGradient: {
     borderRadius: 16,
@@ -2468,96 +2303,64 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(15, 23, 42, 0.08)',
     marginBottom: 4,
   },
-  chipDisabled: { opacity: 0.5 },
   chipText: {
     color: '#000000',
     fontSize: 12,
     fontWeight: '700',
   },
-  monthFilterCardsContainer: {
-    flexDirection: 'row',
-    marginHorizontal: 16,
-    marginVertical: 12,
-    gap: 8,
-  },
-  monthFilterCard: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 20,
-    padding: 16,
+  viewingLimitsBadge: {
+    backgroundColor: 'rgba(0, 217, 255, 0.2)',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    shadowColor: '#00D9FF',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 18,
-    elevation: 8,
-    justifyContent: 'center',
+    borderColor: 'rgba(0, 217, 255, 0.4)',
+    minWidth: 112,
+  },
+  viewingLimitsRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 60,
+    justifyContent: 'space-between',
   },
-  monthFilterCardActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderColor: 'rgba(0, 217, 255, 0.3)',
-    shadowOpacity: 0.5,
+  viewingLimitsChevron: {
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginLeft: 6,
+    marginTop: -1,
   },
-  monthFilterCardText: {
+  viewingLimitsTrack: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
+    marginTop: 6,
+  },
+  viewingLimitsFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  viewingLimitsText: {
     fontSize: 14,
-    fontWeight: '800',
-    color: '#000000',
-    textAlign: 'center',
-  },
-  monthFilterCardTextActive: {
+    fontWeight: '700',
     color: '#00D9FF',
+    textShadowColor: 'rgba(0, 217, 255, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-  // Android-only filter card styles (iOS keeps the glow/glass look above)
-  monthFilterCardAndroidPink: {
-    backgroundColor: 'rgba(255, 255, 255, 0.55)',
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-    borderRadius: 16,
-    shadowColor: 'transparent',
-    elevation: 0,
+  viewingLimitsBadgeMobile: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    minWidth: 96,
   },
-  monthFilterCardAndroidPinkActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderColor: '#4A90E2',
-    borderWidth: 1.5,
-  },
-  monthFilterCardTextAndroidPink: {
-    color: '#1a1a1a',
-    fontSize: 13,
+  viewingLimitsTextMobile: {
+    fontSize: 12,
     fontWeight: '700',
-  },
-  monthFilterCardTextAndroidPinkActive: {
-    color: '#2F6FB5',
-  },
-  monthFilterCardAndroidBlue: {
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
-    borderColor: 'rgba(255, 255, 255, 0.35)',
-    borderRadius: 16,
-    shadowColor: 'transparent',
-    elevation: 0,
-  },
-  monthFilterCardAndroidBlueActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.32)',
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-    borderWidth: 1.5,
-  },
-  monthFilterCardTextAndroidBlue: {
-    color: 'rgba(255, 255, 255, 0.85)',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  monthFilterCardTextAndroidBlueActive: {
-    color: '#ffffff',
-  },
-  blueTintOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(230, 240, 248, 0.22)',
+    color: '#00D9FF',
+    textShadowColor: 'rgba(0, 217, 255, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });
 

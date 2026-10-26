@@ -28,7 +28,6 @@ import { useMedia, MediaItem } from '../context/MediaContext';
 import { formatBytes } from '../utils/format';
 import { hapticKeep, hapticFlick } from '../utils/haptics';
 import { loadViewedItems } from '../utils/viewedMediaTracker';
-import InAppPurchaseManager from '../utils/InAppPurchaseManager';
 import BannerAdManager from '../utils/BannerAdManager';
 import BannerAdComponent from './BannerAdComponent';
 import {
@@ -37,8 +36,19 @@ import {
   checkSpeechRecognitionPermission,
   requestSpeechRecognitionPermission,
 } from '../utils/permissions';
-
-const shareIcon = require('../assets/share.png');
+import {
+  advanceVoiceUtterance,
+  closeVoiceUtterance,
+  EMPTY_VOICE_UTTERANCE,
+  VoiceCommand,
+  VoiceUtteranceState,
+} from '../utils/voiceCommands';
+import VoiceListeningIndicator from './VoiceListeningIndicator';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import UpgradeSheet from './UpgradeSheet';
+import { formatCountdown } from '../utils/viewBudget';
+import { colors } from '../theme';
+import { speakPrompt, stopPrompt } from '../utils/voicePrompt';
 
 export type MediaViewerMediaType = 'photos' | 'videos' | 'all';
 
@@ -77,6 +87,33 @@ const isTrackableMonth = (key?: string): key is string =>
 // Where the end-of-month sheet sits while hidden (below the screen edge)
 const END_OF_MONTH_SHEET_HIDDEN_Y = 480;
 
+// ===== VOICE TUNING =====
+// 'starting' from the VoiceIT tap until the engine really hears audio
+type VoiceState = 'off' | 'starting' | 'listening';
+// Restarts of a dead engine with no sign of life in between before giving up
+const MAX_ENGINE_FAILURES = 3;
+// Words spoken while the viewer is still moving wait here, in order
+const MAX_QUEUED_VOICE_COMMANDS = 8;
+const HEARD_WORDS_SHOWN = 3;
+const VOICE_DRAIN_POLL_MS = 60;
+// A command ran but the item never changed (scroll never landed): free the gate
+const VOICE_DISPATCH_FAILSAFE_MS = 1500;
+const VOICE_WATCHDOG_MS = 3000;
+// Consecutive idle polls before the watchdog restarts the engine: a task the iOS
+// engine has just re-armed reads as idle until Apple marks it running
+const WATCHDOG_IDLE_TICKS = 2;
+// Engine event trace for the Metro console; silent in release builds
+const traceVoice = (...args: unknown[]) => {
+  if (__DEV__) console.log('[VoiceIt]', ...args);
+};
+const VOICE_LEVEL_MIN_INTERVAL_MS = 40;
+// Give a just-torn-down audio session a moment to release before starting again
+const ENGINE_RESTART_GAP_MS = 300;
+// Android's recognizer has no ready event: assume it is live after this long
+const ENGINE_READY_FALLBACK_MS = 2000;
+const sleep = (ms: number) =>
+  new Promise<void>(resolve => setTimeout(resolve, ms));
+
 const MediaViewer: React.FC<MediaViewerProps> = ({
   items: initialItems,
   initialIndex,
@@ -85,6 +122,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   monthKey,
   monthName,
   mediaType,
+  totalCount = 0,
   nextMonth = null,
   onNextMonth,
 }) => {
@@ -104,6 +142,24 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   );
   const [isLoading, setIsLoading] = useState(false);
   const [isFlickTransitioning, setIsFlickTransitioning] = useState(false);
+  // Mirror for callbacks that must not wait for a render (the voice queue)
+  const isFlickTransitioningRef = useRef(false);
+  // True from the moment a flick starts until its list rebuild has settled
+  const trashInFlightRef = useRef(false);
+  // Deferred steps of the flick, cleared if the viewer goes away mid-flick
+  const trashScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const trashSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const initialScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const setFlickTransitioning = useCallback((value: boolean) => {
+    isFlickTransitioningRef.current = value;
+    setIsFlickTransitioning(value);
+  }, []);
   const [isCheckingLoadMore, setIsCheckingLoadMore] = useState(false);
   const [items, setItems] = useState<MediaItem[]>(() => {
     // Initialize with initialItems if available, otherwise empty array
@@ -114,11 +170,12 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   const [viewedItemsSet, setViewedItemsSet] = useState<Set<string>>(new Set());
   const [isCurrentItemViewed, setIsCurrentItemViewed] = useState(false);
   const [remainingTime, setRemainingTime] = useState(0);
-  const [isListening, setIsListening] = useState(false);
-  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceState, setVoiceState] = useState<VoiceState>('off');
+  const [heardWords, setHeardWords] = useState<string[]>([]);
+  const isListening = voiceState !== 'off';
   const [showVoiceTutorial, setShowVoiceTutorial] = useState(false);
   const [hasSeenVoiceTutorial, setHasSeenVoiceTutorial] = useState(false);
-  const [isLoadingPurchase, setIsLoadingPurchase] = useState(false);
+  const [upgradeSheetVisible, setUpgradeSheetVisible] = useState(false);
 
   // ===== END-OF-MONTH DRAWER =====
   const [showEndOfMonthDrawer, setShowEndOfMonthDrawer] = useState(false);
@@ -131,20 +188,21 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   // Index a drag started on, so a swipe past the last item can be told apart from
   // the swipe that merely arrived there
   const dragStartIndexRef = useRef<number | null>(null);
-  const isStoppingRef = useRef<boolean>(false); // Flag to prevent processing commands when stopping
   const isInitialMountRef = useRef<boolean>(true); // Track if this is the initial mount
   const previousIndexRef = useRef<number>(initialIndex); // Track previous index to detect actual navigation
 
-  // ===== VOICE: ONE COMMAND PER ITEM (HARD GATE) =====
-  const commandConsumedForItemRef = useRef<string | null>(null); // item.id that already consumed a command
-  const pendingNavRef = useRef<boolean>(false); // blocks until FlatList actually changes item (currentIndex changes)
-  const partialCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+  // ===== VOICE: EVERY WORD IS A COMMAND, ONE IN FLIGHT AT A TIME =====
+  // Commands heard but not yet executed, in the order they were spoken
+  const voiceQueueRef = useRef<VoiceCommand[]>([]);
+  // Words of the utterance in progress and how many already became commands
+  const voiceUtteranceRef = useRef<VoiceUtteranceState>(EMPTY_VOICE_UTTERANCE);
+  const pendingNavRef = useRef<boolean>(false); // a command ran; blocks until the item actually changes
+  const voiceDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceDispatchFailsafeRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const lastPartialRef = useRef<string>('');
-  const lastProcessedTranscriptRef = useRef<string>(''); // global, not per-item
-  const lastExecutedCommandSignatureRef = useRef<string>('');
-  const PARTIAL_STABLE_MS = 250;
+  const drainVoiceQueueRef = useRef<() => void>(() => {});
+  const heardWordsRef = useRef<string[]>([]);
 
   // Load viewed items set on mount for checkmark display
   useEffect(() => {
@@ -186,7 +244,6 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     markMediaItemAsViewed,
     checkAndMarkMonthCompleted,
     getRemainingCooldownTime,
-    setPremiumStatus,
     isPremiumUser,
     getMonthViewedStats,
   } = useMedia();
@@ -738,23 +795,19 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, items]);
 
-  // ===== VOICE GATE RESET: ONLY when item actually changes =====
+  // ===== VOICE GATE RELEASE: the item changed, so the next queued word may run =====
   useEffect(() => {
-    // Allow exactly one new voice command per new item
+    // A flick trashes through the shared month content, so the viewer re-renders
+    // one item shorter while the flick animation is still running. Releasing the
+    // gate on that early render would start the next word on top of the flick;
+    // the flick releases it itself once the list has settled.
+    if (trashInFlightRef.current) return;
     pendingNavRef.current = false;
-    commandConsumedForItemRef.current = null;
-
-    // Clear any pending partial debounce so it doesn't fire after navigation
-    if (partialCommitTimerRef.current) {
-      clearTimeout(partialCommitTimerRef.current);
-      partialCommitTimerRef.current = null;
+    if (voiceDispatchFailsafeRef.current) {
+      clearTimeout(voiceDispatchFailsafeRef.current);
+      voiceDispatchFailsafeRef.current = null;
     }
-    lastPartialRef.current = '';
-    // Forget the last transcript and command so the same word can drive the next item.
-    // Continuous engines emit one result per utterance, so "keep" twice in a row must work.
-    lastProcessedTranscriptRef.current = '';
-    lastExecutedCommandSignatureRef.current = '';
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    drainVoiceQueueRef.current();
   }, [currentItem?.id]);
 
   // Save viewed items and check completion when component unmounts (viewer closes)
@@ -770,14 +823,30 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         // Error clearing cache
       }
 
-      // Clear voice timers/listeners safety
-      if (partialCommitTimerRef.current) {
-        clearTimeout(partialCommitTimerRef.current);
-        partialCommitTimerRef.current = null;
+      // Clear voice queue/timers safety
+      if (voiceDrainTimerRef.current) {
+        clearTimeout(voiceDrainTimerRef.current);
+        voiceDrainTimerRef.current = null;
       }
-      lastPartialRef.current = '';
+      if (voiceDispatchFailsafeRef.current) {
+        clearTimeout(voiceDispatchFailsafeRef.current);
+        voiceDispatchFailsafeRef.current = null;
+      }
+      voiceQueueRef.current = [];
       pendingNavRef.current = false;
-      commandConsumedForItemRef.current = null;
+
+      // Stop the deferred steps of a flick that never finished
+      for (const timer of [
+        trashScrollTimerRef,
+        trashSettleTimerRef,
+        initialScrollTimerRef,
+      ]) {
+        if (timer.current) {
+          clearTimeout(timer.current);
+          timer.current = null;
+        }
+      }
+      trashInFlightRef.current = false;
 
       // MEMORY OPTIMIZATION: Clear items array to free memory
       // Use ref to get current items value
@@ -876,107 +945,18 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     }
   }, [canViewMedia, getRemainingCooldownTime]);
 
-  // Format time as MM:SS (for 15-minute cooldown)
-  const formatTime = (ms: number): string => {
-    const totalSeconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(
-      2,
-      '0',
-    )}`;
-  };
-
-  // Handle premium purchase
-  const handleGoPremium = async () => {
-    if (isLoadingPurchase) return;
-
-    setIsLoadingPurchase(true);
-    try {
-      const iapManager = InAppPurchaseManager.getInstance();
-      const success = await iapManager.purchaseRemoveAds();
-
-      if (success) {
-        // Wait a bit for the purchase listener to process the purchase
-        await new Promise<void>(resolve => setTimeout(resolve, 1000));
-
-        // Check premium status after purchase
-        const isPremium = await iapManager.checkPremiumStatus();
-        if (isPremium) {
-          // Update MediaContext premium status
-          await setPremiumStatus(true);
-          Alert.alert(
-            'Premium Activated!',
-            'You now have unlimited views and no ads. Enjoy!',
-            [{ text: 'OK', onPress: onClose }],
-          );
-        } else {
-          // Purchase might still be processing, check again after a delay
-          setTimeout(async () => {
-            const premiumStatus = await iapManager.checkPremiumStatus();
-            if (premiumStatus) {
-              await setPremiumStatus(true);
-            }
-          }, 2000);
-        }
-      }
-    } catch (error: any) {
-      console.error('Purchase error:', error);
-      if (error.code !== 'E_USER_CANCELLED') {
-        Alert.alert(
-          'Purchase Failed',
-          error.message || 'Unable to complete purchase. Please try again.',
-          [{ text: 'OK' }],
-        );
-      }
-    } finally {
-      setIsLoadingPurchase(false);
-    }
-  };
-
-  // Handle restore purchases
-  const handleRestorePurchases = async () => {
-    if (isLoadingPurchase) return;
-
-    setIsLoadingPurchase(true);
-    try {
-      const iapManager = InAppPurchaseManager.getInstance();
-      const restored = await iapManager.restorePurchases();
-
-      if (restored) {
-        const premiumStatus = await iapManager.checkPremiumStatus();
-        await setPremiumStatus(premiumStatus);
-        Alert.alert('Success', 'Your purchases have been restored.', [
-          { text: 'OK', onPress: premiumStatus ? onClose : undefined },
-        ]);
-      } else {
-        Alert.alert(
-          'No Purchases Found',
-          'No previous purchases were found to restore.',
-        );
-      }
-    } catch (error: any) {
-      Alert.alert(
-        'Restore Failed',
-        error.message || 'Unable to restore purchases. Please try again.',
-      );
-    } finally {
-      setIsLoadingPurchase(false);
-    }
-  };
-
   // Called when a programmatic scroll settles (momentum end) and by the failsafe timer
   const finishNavigation = useCallback((fromFailsafe: boolean) => {
     isNavigatingRef.current = false;
     if (!fromFailsafe) return;
     navigationFailsafeRef.current = null;
-    // If the page never changed, free the voice gate so the next command is not stuck
+    // If the page never changed, free the voice gate so the next word is not stuck
     if (
       navigationStartIndexRef.current !== null &&
       currentIndexRef.current === navigationStartIndexRef.current
     ) {
       pendingNavRef.current = false;
-      commandConsumedForItemRef.current = null;
+      drainVoiceQueueRef.current();
     }
     navigationStartIndexRef.current = null;
   }, []);
@@ -1048,18 +1028,53 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     [smoothNavigate],
   );
 
+  // FlatList throws when the index is past the end, and the list can shrink while
+  // a scroll waits behind a timer, so clamp against the live list at call time
+  const scrollToIndexSafely = useCallback((index: number) => {
+    const list = flatListRef.current;
+    const count = itemsRef.current.length;
+    if (!list || count === 0) return;
+    list.scrollToIndex({
+      index: Math.max(0, Math.min(index, count - 1)),
+      animated: false,
+    });
+  }, []);
+
+  // The flick is over: drop the overlay and let the next queued word run
+  const finishTrash = useCallback(() => {
+    if (!trashInFlightRef.current) return;
+    trashInFlightRef.current = false;
+    setFlickTransitioning(false);
+    // The gate-release effect sat this flick out, so retire its failsafe here
+    if (voiceDispatchFailsafeRef.current) {
+      clearTimeout(voiceDispatchFailsafeRef.current);
+      voiceDispatchFailsafeRef.current = null;
+    }
+    pendingNavRef.current = false;
+    drainVoiceQueueRef.current();
+  }, [setFlickTransitioning]);
+
   const handleTrash = useCallback((): boolean => {
-    if (!currentItem) return false;
+    // One flick at a time: a second one starting mid-animation would trash from a
+    // list that is already a render behind and scroll past its end
+    if (trashInFlightRef.current) return false;
     if (endOfMonthDrawerVisibleRef.current) return false;
 
+    const startIndex = currentIndexRef.current;
+    const itemToTrash = itemsRef.current[startIndex];
+    if (!itemToTrash) return false;
+
     // Flicking the last item of a finished month leaves nothing left to do
-    const wasLastItem = currentIndex === items.length - 1;
+    const wasLastItem = startIndex === itemsRef.current.length - 1;
+
+    trashInFlightRef.current = true;
 
     // A flicked item is done with, so it counts as seen for month progress
-    recordItemViewed(currentItem.id);
+    recordItemViewed(itemToTrash.id);
 
-    // Add to trash
-    addToTrash(currentItem);
+    // Add to trash. This also removes it from the shared month content, so the
+    // viewer may re-render without it before the animation below finishes.
+    addToTrash(itemToTrash);
 
     // Animate and move to next item
     Animated.parallel([
@@ -1075,43 +1090,43 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       }),
     ]).start(() => {
       // Show overlay to hide FlatList re-layout jank
-      setIsFlickTransitioning(true);
-
-      // Remove item from local items array
-      const newItems = items.filter((_, index) => index !== currentIndex);
+      setFlickTransitioning(true);
 
       // Reset animations
       translateY.setValue(0);
       opacity.setValue(1);
 
-      let targetIdx: number;
-      if (currentIndex < newItems.length) {
-        targetIdx = currentIndex;
-      } else if (newItems.length > 0) {
-        targetIdx = newItems.length - 1;
-      } else {
-        setIsFlickTransitioning(false);
+      // Drop the flicked item from the live list, which the context may already
+      // have shortened; filtering by id is right either way
+      const newItems = itemsRef.current.filter(
+        item => item.id !== itemToTrash.id,
+      );
+
+      if (newItems.length === 0) {
+        finishTrash();
         // Nothing left to show: the parent runs the final scan, so skip the fallback
         closedViaButtonRef.current = true;
         onClose();
         return;
       }
 
-      // Update state behind the overlay
+      // Hold the position the flicked item occupied, or the new last item
+      const targetIdx = Math.min(startIndex, newItems.length - 1);
+
+      // Update state behind the overlay, keeping the ref in step so a queued
+      // scroll clamps against the list that is really there
       setItems(newItems);
+      itemsRef.current = newItems;
       setCurrentIndex(targetIdx);
 
       // Wait for FlatList to settle, then scroll and hide overlay
-      setTimeout(() => {
-        if (flatListRef.current && newItems.length > 0) {
-          flatListRef.current.scrollToIndex({
-            index: targetIdx,
-            animated: false,
-          });
-        }
+      trashScrollTimerRef.current = setTimeout(() => {
+        trashScrollTimerRef.current = null;
+        scrollToIndexSafely(targetIdx);
         // Give FlatList one more frame to finish layout
-        setTimeout(() => {
-          setIsFlickTransitioning(false);
+        trashSettleTimerRef.current = setTimeout(() => {
+          trashSettleTimerRef.current = null;
+          finishTrash();
           if (wasLastItem && isAtEndOfMonth()) {
             openEndOfMonthDrawer();
           }
@@ -1120,14 +1135,14 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     });
     return true;
   }, [
-    currentItem,
-    currentIndex,
-    items,
     addToTrash,
     onClose,
     recordItemViewed,
     isAtEndOfMonth,
     openEndOfMonthDrawer,
+    setFlickTransitioning,
+    finishTrash,
+    scrollToIndexSafely,
   ]);
 
   // Close button: flush the current item as viewed first so the parent's final
@@ -1175,237 +1190,316 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   handleTrashRef.current = handleTrash;
 
   const wantsListeningRef = useRef(false); // true from the VoiceIT press until Stop/close
+  const voiceStateRef = useRef<VoiceState>('off');
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const readyFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const engineFailuresRef = useRef(0);
+  const lastEngineStopAtRef = useRef(0);
   const startEngineRef = useRef<() => Promise<void>>(async () => {});
-  const MAX_ENGINE_FAILURES = 3;
+  // Microphone level 0..1 fed straight into the indicator animation, no re-render
+  const voiceLevel = useRef(new Animated.Value(0)).current;
+  const voiceLevelRef = useRef({ value: 0, at: 0 });
 
-  const clearVoiceBuffers = useCallback(() => {
-    if (partialCommitTimerRef.current) {
-      clearTimeout(partialCommitTimerRef.current);
-      partialCommitTimerRef.current = null;
-    }
-    lastPartialRef.current = '';
-    lastProcessedTranscriptRef.current = '';
-    lastExecutedCommandSignatureRef.current = '';
+  const updateVoiceState = useCallback((next: VoiceState) => {
+    if (voiceStateRef.current === next) return;
+    voiceStateRef.current = next;
+    setVoiceState(next);
   }, []);
 
-  const releaseVoiceGate = useCallback(() => {
-    pendingNavRef.current = false;
-    commandConsumedForItemRef.current = null;
+  const clearVoiceTimers = useCallback(() => {
+    for (const ref of [
+      restartTimerRef,
+      readyFallbackTimerRef,
+      voiceDrainTimerRef,
+      voiceDispatchFailsafeRef,
+    ]) {
+      if (ref.current) {
+        clearTimeout(ref.current);
+        ref.current = null;
+      }
+    }
   }, []);
 
-  const stopVoiceRecognition = useCallback(async () => {
-    wantsListeningRef.current = false;
-    if (restartTimerRef.current) {
-      clearTimeout(restartTimerRef.current);
-      restartTimerRef.current = null;
+  const showHeardWords = useCallback((words: string[]) => {
+    const tail = words.slice(-HEARD_WORDS_SHOWN);
+    if (tail.join(' ') === heardWordsRef.current.join(' ')) return;
+    heardWordsRef.current = tail;
+    setHeardWords(tail);
+  }, []);
+
+  // The engine is really hearing audio: first start, volume or result event after a start
+  const markEngineLive = useCallback(() => {
+    if (readyFallbackTimerRef.current) {
+      clearTimeout(readyFallbackTimerRef.current);
+      readyFallbackTimerRef.current = null;
     }
-    // Swallow results that are still in flight
-    isStoppingRef.current = true;
-    clearVoiceBuffers();
-    releaseVoiceGate();
-    setIsListening(false);
-    setVoiceTranscript('');
-    try {
-      await STT.stop();
-    } catch (error) {
-      // Engine was already stopped
+    if (wantsListeningRef.current) updateVoiceState('listening');
+  }, [updateVoiceState]);
+
+  // Idle polls in a row seen by the watchdog
+  const watchdogIdleTicksRef = useRef(0);
+  // A real event from the engine (start, volume, transcript): it is alive, so any
+  // restart attempts counted so far are forgiven
+  const noteEngineAlive = useCallback(() => {
+    engineFailuresRef.current = 0;
+    watchdogIdleTicksRef.current = 0;
+    markEngineLive();
+  }, [markEngineLive]);
+
+  // Runs the next queued word once the viewer has settled; polls while it is moving
+  const drainVoiceQueue = useCallback(() => {
+    if (voiceDrainTimerRef.current) {
+      clearTimeout(voiceDrainTimerRef.current);
+      voiceDrainTimerRef.current = null;
     }
-    setTimeout(() => {
-      isStoppingRef.current = false;
-    }, 1000);
-  }, [clearVoiceBuffers, releaseVoiceGate]);
+    if (!wantsListeningRef.current || endOfMonthDrawerVisibleRef.current) {
+      voiceQueueRef.current = [];
+      return;
+    }
+    if (voiceQueueRef.current.length === 0) return;
+    if (
+      pendingNavRef.current ||
+      isNavigatingRef.current ||
+      isFlickTransitioningRef.current ||
+      trashInFlightRef.current
+    ) {
+      voiceDrainTimerRef.current = setTimeout(
+        () => drainVoiceQueueRef.current(),
+        VOICE_DRAIN_POLL_MS,
+      );
+      return;
+    }
 
-  const commitVoiceCommandOncePerItem = useCallback(
-    (transcript: string) => {
-      if (isStoppingRef.current) return;
-
-      const normalized = transcript
-        .toLowerCase()
-        .replace(/[^\w\s']/g, '')
-        .trim();
-      if (!normalized) return;
-
-      // Ignore repeated callbacks carrying the same transcript
-      if (normalized === lastProcessedTranscriptRef.current) return;
-      lastProcessedTranscriptRef.current = normalized;
-
-      const item = itemsRef.current[currentIndexRef.current];
-      if (!item) return;
-
-      const cmdRegex =
-        /\b(keep|swipe|next|continue|trash|flick|delete|remove)\b/g;
-      const currentCommands: string[] = [];
-      let match: RegExpExecArray | null;
-      while ((match = cmdRegex.exec(normalized)) !== null) {
-        currentCommands.push(match[1]);
-      }
-      if (currentCommands.length === 0) return;
-
-      // The final result repeats the command sequence the partial already executed
-      const commandSignature = currentCommands.join(',');
-      if (commandSignature === lastExecutedCommandSignatureRef.current) return;
-
-      if (commandConsumedForItemRef.current === item.id) {
-        return;
-      }
-      if (pendingNavRef.current) {
-        return;
-      }
-
-      const lastCmd = currentCommands[currentCommands.length - 1];
-      const isTrash = ['trash', 'flick', 'delete', 'remove'].includes(lastCmd);
-      const isNext = ['keep', 'swipe', 'next', 'continue'].includes(lastCmd);
-      if (!isTrash && !isNext) return;
-
-      commandConsumedForItemRef.current = item.id;
-      pendingNavRef.current = true;
-      setVoiceTranscript('');
-
-      const executed = isTrash
+    const command = voiceQueueRef.current.shift();
+    if (!command || !itemsRef.current[currentIndexRef.current]) {
+      voiceQueueRef.current = [];
+      return;
+    }
+    pendingNavRef.current = true;
+    const executed =
+      command === 'trash'
         ? handleTrashRef.current?.() === true
         : handleNextRef.current?.() === true;
+    if (!executed) {
+      // Nothing moved (single item, drawer opened...): free the gate and drop the
+      // rest so stale words never fire later
+      pendingNavRef.current = false;
+      voiceQueueRef.current = [];
+      return;
+    }
+    if (command === 'trash') {
+      hapticFlick();
+    } else {
+      hapticKeep();
+    }
+    // The item-change effect releases the gate; this covers a scroll that never lands
+    voiceDispatchFailsafeRef.current = setTimeout(() => {
+      voiceDispatchFailsafeRef.current = null;
+      pendingNavRef.current = false;
+      drainVoiceQueueRef.current();
+    }, VOICE_DISPATCH_FAILSAFE_MS);
+  }, []);
+  drainVoiceQueueRef.current = drainVoiceQueue;
 
-      if (executed) {
-        // Only a command that actually ran counts as executed
-        lastExecutedCommandSignatureRef.current = commandSignature;
-        if (isTrash) {
-          hapticFlick();
-        } else {
-          hapticKeep();
-        }
-      } else {
-        // Nothing moved (single item, navigation in progress...): undo the locks so
-        // the user can simply say it again
-        releaseVoiceGate();
-        lastProcessedTranscriptRef.current = '';
-      }
+  const enqueueVoiceCommands = useCallback(
+    (commands: VoiceCommand[]) => {
+      if (commands.length === 0) return;
+      voiceQueueRef.current = [...voiceQueueRef.current, ...commands].slice(
+        -MAX_QUEUED_VOICE_COMMANDS,
+      );
+      drainVoiceQueue();
     },
-    [releaseVoiceGate],
+    [drainVoiceQueue],
   );
 
-  // Continuous engines fire onSpeechEnd after every utterance while still listening;
-  // Apple's recognizer fires it (or a benign error) when the session really ended.
-  // Ask the engine which case it is, twice, before restarting it.
-  const scheduleEngineRestartIfNeeded = useCallback((reason: string) => {
-    if (!wantsListeningRef.current || restartTimerRef.current) return;
-
-    const isEngineIdle = async (): Promise<boolean> => {
-      try {
-        return (await STT.isRecognizing()) === 0;
-      } catch (error) {
-        return true;
-      }
-    };
-
-    restartTimerRef.current = setTimeout(async () => {
-      restartTimerRef.current = null;
+  // Every partial carries the whole transcript so far; only the new words become commands
+  const handleTranscript = useCallback(
+    (transcript: unknown, isFinal: boolean) => {
       if (!wantsListeningRef.current) return;
-      if (!(await isEngineIdle())) return;
-      await new Promise<void>(resolve => setTimeout(resolve, 500));
-      if (!wantsListeningRef.current) return;
-      if (!(await isEngineIdle())) return;
-
-      try {
-        await startEngineRef.current();
-      } catch (error) {
-        engineFailuresRef.current += 1;
-        if (engineFailuresRef.current >= MAX_ENGINE_FAILURES) {
-          console.warn(
-            '[VoiceIt] giving up after repeated engine failures',
-            error,
-          );
-          wantsListeningRef.current = false;
-          setIsListening(false);
-          return;
-        }
-        scheduleEngineRestartIfNeeded('restart failed');
-      }
-    }, 400);
-  }, []);
-
-  // The single place speech handlers are registered. The STT wrapper binds native
-  // listeners to whatever functions are set when start() runs, so this is called
-  // right before every start.
-  const attachSpeechHandlers = useCallback(() => {
-    STT.onSpeechStart = () => {
-      engineFailuresRef.current = 0;
-      setIsListening(true);
-    };
-    STT.onSpeechRecognized = () => {};
-    STT.onSpeechEnd = () => {
-      scheduleEngineRestartIfNeeded('speech end');
-    };
-    STT.onSpeechError = (e: any) => {
-      clearVoiceBuffers();
-      releaseVoiceGate();
-      setVoiceTranscript('');
-      const description = `${e?.error?.message ?? ''} ${
-        e?.error?.code ?? ''
-      }`.trim();
-      // Silence, session caps and cancellations are normal; anything else is a failure
-      const isBenign =
-        /no speech|retry|cancel|timeout|\b(216|203|1110)\b/i.test(description);
-      if (!isBenign) {
-        engineFailuresRef.current += 1;
-        console.warn('[VoiceIt] speech error:', description);
-        if (engineFailuresRef.current >= MAX_ENGINE_FAILURES) {
-          wantsListeningRef.current = false;
-          setIsListening(false);
-          return;
-        }
-      }
-      scheduleEngineRestartIfNeeded(isBenign ? 'benign error' : 'error');
-    };
-    STT.onSpeechResults = (e: any) => {
-      if (isStoppingRef.current) return;
-      if (partialCommitTimerRef.current) {
-        clearTimeout(partialCommitTimerRef.current);
-        partialCommitTimerRef.current = null;
-      }
-      const transcript = e?.value?.[0];
-      if (typeof transcript === 'string' && transcript) {
-        const lower = transcript.toLowerCase();
-        setVoiceTranscript(lower);
-        commitVoiceCommandOncePerItem(lower);
-      }
-    };
-    STT.onSpeechPartialResults = (e: any) => {
-      if (isStoppingRef.current) return;
-      const transcript = e?.value?.[0];
+      noteEngineAlive();
       if (typeof transcript !== 'string' || !transcript) return;
-      const partial = transcript.toLowerCase();
-      setVoiceTranscript(partial);
-      lastPartialRef.current = partial;
-      // Commit once the partial has been stable for a moment; no need to wait for the final
-      if (partialCommitTimerRef.current) {
-        clearTimeout(partialCommitTimerRef.current);
-      }
-      partialCommitTimerRef.current = setTimeout(() => {
-        commitVoiceCommandOncePerItem(lastPartialRef.current);
-      }, PARTIAL_STABLE_MS);
-    };
-    STT.onSpeechVolumeChanged = () => {};
-  }, [
-    clearVoiceBuffers,
-    releaseVoiceGate,
-    commitVoiceCommandOncePerItem,
-    scheduleEngineRestartIfNeeded,
-  ]);
+      traceVoice(isFinal ? 'final:' : 'partial:', transcript);
+      // The helper closes the utterance on a final result and ignores the echo a
+      // re-arming engine sends straight after it
+      const { next, commands, words } = advanceVoiceUtterance(
+        voiceUtteranceRef.current,
+        transcript,
+        isFinal,
+      );
+      voiceUtteranceRef.current = next;
+      if (commands.length > 0) traceVoice('commands:', commands.join(', '));
+      showHeardWords(words);
+      enqueueVoiceCommands(commands);
+    },
+    [noteEngineAlive, showHeardWords, enqueueVoiceCommands],
+  );
 
-  // Tear down, re-register handlers, apply the license and start the engine
-  const startEngine = useCallback(async () => {
+  const handleVolume = useCallback(
+    (e: any) => {
+      if (!wantsListeningRef.current) return;
+      noteEngineAlive();
+      const raw = typeof e?.value === 'number' ? e.value : 0;
+      // Android reports dB (about -2..10); anything already in 0..1 is taken as a ratio
+      const ratio =
+        raw < 0 || raw > 1 ? Math.min(1, Math.max(0, (raw + 2) / 12)) : raw;
+      const smoothed = voiceLevelRef.current.value * 0.5 + ratio * 0.5;
+      const now = Date.now();
+      if (now - voiceLevelRef.current.at < VOICE_LEVEL_MIN_INTERVAL_MS) {
+        voiceLevelRef.current.value = smoothed;
+        return;
+      }
+      voiceLevelRef.current = { value: smoothed, at: now };
+      voiceLevel.setValue(smoothed);
+    },
+    [noteEngineAlive, voiceLevel],
+  );
+
+  // Tears everything down. destroy(), not stop(): the Android engine re-arms itself
+  // after a plain stop and would keep the microphone open.
+  const stopVoiceRecognition = useCallback(async () => {
+    wantsListeningRef.current = false;
+    clearVoiceTimers();
+    voiceQueueRef.current = [];
+    voiceUtteranceRef.current = EMPTY_VOICE_UTTERANCE;
+    pendingNavRef.current = false;
+    updateVoiceState('off');
+    showHeardWords([]);
+    voiceLevelRef.current = { value: 0, at: 0 };
+    voiceLevel.setValue(0);
+    lastEngineStopAtRef.current = Date.now();
+    stopPrompt();
     try {
       await STT.destroy();
-    } catch (error) {
-      // Nothing to destroy
+    } catch {
+      // Engine was already gone
     }
-    // Give the audio session a moment to release before starting again
-    await new Promise<void>(resolve => setTimeout(resolve, 300));
-    if (!wantsListeningRef.current) return;
+  }, [clearVoiceTimers, updateVoiceState, showHeardWords, voiceLevel]);
 
-    attachSpeechHandlers();
+  // Both engines re-arm themselves after a final result or an error, so this only
+  // runs for an engine that really died: confirm twice that it is idle, then start
+  // it again. Attempts are counted until the engine shows life, then forgiven.
+  const scheduleEngineRestartIfNeeded = useCallback(
+    (reason: string) => {
+      if (!wantsListeningRef.current || restartTimerRef.current) return;
+
+      const isEngineIdle = async (): Promise<boolean> => {
+        try {
+          return (await STT.isRecognizing()) === 0;
+        } catch {
+          return true;
+        }
+      };
+
+      restartTimerRef.current = setTimeout(async () => {
+        restartTimerRef.current = null;
+        if (!wantsListeningRef.current) return;
+        if (!(await isEngineIdle())) return;
+        await sleep(500);
+        if (!wantsListeningRef.current) return;
+        if (!(await isEngineIdle())) return;
+
+        if (engineFailuresRef.current >= MAX_ENGINE_FAILURES) {
+          console.warn(
+            `[VoiceIt] giving up: the engine stayed dead through ${engineFailuresRef.current} restarts (${reason})`,
+          );
+          stopVoiceRecognition();
+          return;
+        }
+        engineFailuresRef.current += 1;
+        traceVoice(
+          'restarting engine:',
+          reason,
+          'attempt',
+          engineFailuresRef.current,
+        );
+        try {
+          await startEngineRef.current();
+        } catch (error) {
+          console.warn('[VoiceIt] engine restart failed', error);
+          // The retry gets a fresh native instance, the way every start used to
+          try {
+            await STT.destroy();
+          } catch {
+            // Nothing to destroy
+          }
+          lastEngineStopAtRef.current = Date.now();
+          scheduleEngineRestartIfNeeded('restart failed');
+        }
+      }, 400);
+    },
+    [stopVoiceRecognition],
+  );
+
+  const handleSpeechError = useCallback((e: any) => {
+    if (!wantsListeningRef.current) return;
+    // Close the utterance rather than forget it. Apple reports a benign error on
+    // every pause, and the session carries its transcript across that, so a reset
+    // here would make the words already acted on look new and run them again.
+    voiceUtteranceRef.current = closeVoiceUtterance(voiceUtteranceRef.current);
+    const description = `${e?.error?.message ?? ''} ${
+      e?.error?.code ?? ''
+    }`.trim();
+    // Silence, session caps and cancellations are normal; anything else is worth a log
+    const isBenign =
+      /no speech|no match|retry|cancel|timeout|\b(216|203|1110)\b/i.test(
+        description,
+      );
+    if (isBenign) {
+      traceVoice('benign error:', description);
+    } else {
+      console.warn('[VoiceIt] speech error:', description);
+    }
+    // Both engines re-arm themselves after an error (iOS rearmTask, Android
+    // rearmContinuousAuto); a restart from here would race that and drop audio.
+    // The watchdog covers an engine that stays dead.
+  }, []);
+
+  // The STT wrapper binds native listeners to whatever functions are set the first
+  // time start() runs, so register stable delegates once and route them through
+  // this ref, which always holds the latest handlers.
+  const voiceHandlersRef = useRef({
+    onStart: () => {},
+    onEnd: () => {},
+    onError: (_e: any) => {},
+    onResults: (_e: any) => {},
+    onPartialResults: (_e: any) => {},
+    onVolume: (_e: any) => {},
+  });
+  voiceHandlersRef.current = {
+    onStart: () => {
+      traceVoice('engine start');
+      noteEngineAlive();
+    },
+    // Fired after every final result, right before the engine re-arms itself
+    onEnd: () => traceVoice('speech end'),
+    onError: handleSpeechError,
+    onResults: (e: any) => handleTranscript(e?.value?.[0], true),
+    onPartialResults: (e: any) => handleTranscript(e?.value?.[0], false),
+    onVolume: handleVolume,
+  };
+  useEffect(() => {
+    STT.onSpeechStart = () => voiceHandlersRef.current.onStart();
+    STT.onSpeechRecognized = () => {};
+    STT.onSpeechEnd = () => voiceHandlersRef.current.onEnd();
+    STT.onSpeechError = (e: any) => voiceHandlersRef.current.onError(e);
+    STT.onSpeechResults = (e: any) => voiceHandlersRef.current.onResults(e);
+    STT.onSpeechPartialResults = (e: any) =>
+      voiceHandlersRef.current.onPartialResults(e);
+    STT.onSpeechVolumeChanged = (e: any) =>
+      voiceHandlersRef.current.onVolume(e);
+  }, []);
+
+  // Apply the license and start the engine. No teardown first: the engine is
+  // destroyed on Stop, so a tap goes straight to listening instead of paying a
+  // full rebuild every time.
+  const startEngine = useCallback(async () => {
+    const sinceStop = Date.now() - lastEngineStopAtRef.current;
+    if (sinceStop < ENGINE_RESTART_GAP_MS) {
+      await sleep(ENGINE_RESTART_GAP_MS - sinceStop);
+    }
+    if (!wantsListeningRef.current) return;
 
     // destroy() discards the native recognizer (and its license on iOS), so re-apply every time
     if (DAVOICE_LICENSE) {
@@ -1422,16 +1516,30 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         '[VoiceIt] DAVOICE_LICENSE is not set in src/.env; speech recognition may not start',
       );
     }
+    if (!wantsListeningRef.current) return;
 
     await STT.start('en-US');
-    setIsListening(true);
-  }, [attachSpeechHandlers]);
+    if (!wantsListeningRef.current) {
+      // Stop was tapped while the start was in flight: do not leave the microphone open
+      STT.destroy().catch(() => {});
+      return;
+    }
+    // Android's recognizer has no ready event; if nothing is heard for a while, assume it is live
+    if (readyFallbackTimerRef.current) {
+      clearTimeout(readyFallbackTimerRef.current);
+    }
+    readyFallbackTimerRef.current = setTimeout(() => {
+      readyFallbackTimerRef.current = null;
+      markEngineLive();
+    }, ENGINE_READY_FALLBACK_MS);
+  }, [markEngineLive]);
   startEngineRef.current = startEngine;
 
   const startVoiceRecognitionInternal = async () => {
-    isStoppingRef.current = false;
-    releaseVoiceGate();
-    clearVoiceBuffers();
+    if (wantsListeningRef.current) return;
+    voiceQueueRef.current = [];
+    voiceUtteranceRef.current = EMPTY_VOICE_UTTERANCE;
+    pendingNavRef.current = false;
     engineFailuresRef.current = 0;
 
     // Check microphone permission
@@ -1469,13 +1577,18 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     }
 
     wantsListeningRef.current = true;
+    updateVoiceState('starting');
+    showHeardWords([]);
+    // Hanna confirms the mode out loud before the microphone opens, so the
+    // recognizer never hears the prompt itself
+    await speakPrompt('Hands free');
+    if (!wantsListeningRef.current) return; // Stop or close during the prompt
     try {
       await startEngine();
-      setVoiceTranscript('');
     } catch (error) {
       console.warn('[VoiceIt] failed to start speech recognition', error);
       wantsListeningRef.current = false;
-      setIsListening(false);
+      updateVoiceState('off');
     }
   };
 
@@ -1488,25 +1601,47 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
     await startVoiceRecognitionInternal();
   };
 
+  // Safety net: an engine that silently died (its own re-arm failed) is started
+  // again, but only once it has read as idle on consecutive polls, so a task the
+  // engine has just re-armed is left alone
+  useEffect(() => {
+    if (!isListening) return;
+    watchdogIdleTicksRef.current = 0;
+    const watchdog = setInterval(async () => {
+      if (!wantsListeningRef.current || restartTimerRef.current) return;
+      if (voiceStateRef.current !== 'listening') return;
+      let idle = false;
+      try {
+        idle = (await STT.isRecognizing()) === 0;
+      } catch {
+        idle = false;
+      }
+      if (!idle) {
+        watchdogIdleTicksRef.current = 0;
+        return;
+      }
+      watchdogIdleTicksRef.current += 1;
+      traceVoice('watchdog: engine idle', watchdogIdleTicksRef.current);
+      if (watchdogIdleTicksRef.current >= WATCHDOG_IDLE_TICKS) {
+        watchdogIdleTicksRef.current = 0;
+        scheduleEngineRestartIfNeeded('watchdog');
+      }
+    }, VOICE_WATCHDOG_MS);
+    return () => clearInterval(watchdog);
+  }, [isListening, scheduleEngineRestartIfNeeded]);
+
   // Stop the engine when the viewer goes away
   useEffect(() => {
     return () => {
       wantsListeningRef.current = false;
-      if (restartTimerRef.current) {
-        clearTimeout(restartTimerRef.current);
-        restartTimerRef.current = null;
-      }
-      if (partialCommitTimerRef.current) {
-        clearTimeout(partialCommitTimerRef.current);
-        partialCommitTimerRef.current = null;
-      }
-      STT.destroy()
-        .then(() => STT.removeAllListeners())
-        .catch(() => {
-          // Engine was not running
-        });
+      clearVoiceTimers();
+      voiceQueueRef.current = [];
+      stopPrompt();
+      STT.destroy().catch(() => {
+        // Engine was not running
+      });
     };
-  }, []);
+  }, [clearVoiceTimers]);
 
   // Only handle vertical gestures for trash (horizontal is handled by FlatList)
   const onVerticalGestureEvent = Animated.event(
@@ -1591,18 +1726,15 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       const targetIndex = initialIndexRef.current;
       if (targetIndex >= 0 && targetIndex < items.length) {
         setHasScrolledToInitial(true);
-        // Small delay to ensure FlatList is ready
-        setTimeout(() => {
-          if (flatListRef.current) {
-            flatListRef.current.scrollToIndex({
-              index: targetIndex,
-              animated: false,
-            });
-          }
+        // Small delay to ensure FlatList is ready. A flick can land inside that
+        // delay and shorten the list, so the scroll clamps when it actually runs.
+        initialScrollTimerRef.current = setTimeout(() => {
+          initialScrollTimerRef.current = null;
+          scrollToIndexSafely(targetIndex);
         }, 100);
       }
     }
-  }, [hasScrolledToInitial, items.length]);
+  }, [hasScrolledToInitial, items.length, scrollToIndexSafely]);
 
   const toggleControls = () => {
     setShowControls(!showControls);
@@ -1633,38 +1765,37 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       <View style={styles.container}>
         <StatusBar hidden />
         <View style={styles.blockedContainer}>
-          <Text style={styles.blockedIcon}>⏳</Text>
-          <Text style={styles.blockedTitle}>Viewing Limit Reached</Text>
-          <Text style={styles.blockedTimer}>
-            Resets in: {formatTime(remainingTime)}
-          </Text>
-          <Text style={styles.premiumDescription}>
-            Go premium - pay once no more limits no more ads.
-          </Text>
-          <View style={styles.blockedButtonsContainer}>
-            <TouchableOpacity
-              style={[styles.blockedButton, styles.premiumButton]}
-              onPress={handleGoPremium}
-              disabled={isLoadingPurchase}
-            >
-              {isLoadingPurchase ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.blockedButtonText}>Go Premium</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.blockedButton} onPress={onClose}>
-              <Text style={styles.blockedButtonText}>Close</Text>
-            </TouchableOpacity>
+          <View style={styles.blockedIconWrap}>
+            <Text style={styles.blockedIcon}>⏳</Text>
           </View>
+          <Text style={styles.blockedTitle}>You've used your free views</Text>
+          <Text style={styles.blockedTimer}>
+            {formatCountdown(remainingTime)}
+          </Text>
+          <Text style={styles.blockedSubtitle}>until they refill</Text>
           <TouchableOpacity
-            style={styles.restoreButton}
-            onPress={handleRestorePurchases}
-            disabled={isLoadingPurchase}
+            style={styles.blockedPrimary}
+            onPress={() => setUpgradeSheetVisible(true)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
           >
-            <Text style={styles.restoreButtonText}>Restore Purchases</Text>
+            <Text style={styles.blockedPrimaryText}>Go unlimited</Text>
+            <Text style={styles.blockedPrimarySub}>
+              Premium · one-time purchase
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.blockedSecondary}
+            onPress={onClose}
+            accessibilityRole="button"
+          >
+            <Text style={styles.blockedSecondaryText}>Close</Text>
           </TouchableOpacity>
         </View>
+        <UpgradeSheet
+          visible={upgradeSheetVisible}
+          onClose={() => setUpgradeSheetVisible(false)}
+        />
       </View>
     );
   }
@@ -1675,7 +1806,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       <View style={styles.container}>
         <StatusBar hidden />
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color={colors.teal} />
         </View>
       </View>
     );
@@ -1689,7 +1820,7 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       {/* Loading Indicator */}
       {(isLoading || isCheckingLoadMore || isFlickTransitioning) && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color={colors.teal} />
         </View>
       )}
 
@@ -1834,9 +1965,15 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
                         {item.type === 'video' ? (
                           videoError[item.id] ? (
                             <View style={styles.videoErrorContainer}>
-                              <Text style={styles.videoErrorIcon}>🎥</Text>
+                              <View style={styles.videoErrorIconWrap}>
+                                <Ionicons
+                                  name="videocam-off-outline"
+                                  size={36}
+                                  color={colors.coral}
+                                />
+                              </View>
                               <Text style={styles.videoErrorTitle}>
-                                Video Unavailable
+                                Video unavailable
                               </Text>
                               <Text style={styles.videoErrorText}>
                                 This video cannot be played
@@ -1924,8 +2061,16 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
 
                       {/* Viewed Checkmark Badge - only show on current item */}
                       {isCurrentItem && isCurrentItemViewed && (
-                        <View style={styles.viewedBadge}>
-                          <Text style={styles.viewedCheckmark}>✓</Text>
+                        <View
+                          style={[styles.viewedBadge, { top: insets.top + 64 }]}
+                          pointerEvents="none"
+                        >
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={14}
+                            color={colors.teal}
+                          />
+                          <Text style={styles.viewedBadgeText}>Seen</Text>
                         </View>
                       )}
                     </TouchableOpacity>
@@ -1953,10 +2098,15 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
             <TouchableOpacity
               style={styles.voiceTutorialCloseButton}
               onPress={handleCloseVoiceTutorial}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
             >
-              <Text style={styles.voiceTutorialCloseText}>✕</Text>
+              <Ionicons name="close" size={18} color={colors.text} />
             </TouchableOpacity>
-            <Text style={styles.voiceTutorialTitle}>Voice Commands</Text>
+            <View style={styles.voiceTutorialIconWrap}>
+              <Ionicons name="mic" size={28} color={colors.teal} />
+            </View>
+            <Text style={styles.voiceTutorialTitle}>Voice commands</Text>
             <View style={styles.voiceTutorialContent}>
               <Text style={styles.voiceTutorialText}>
                 Say <Text style={styles.voiceTutorialHighlight}>swipe</Text> or{' '}
@@ -1977,13 +2127,34 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
       {showControls && (
         <View style={styles.controlsOverlay}>
           {/* Top Controls */}
-          <View style={styles.topControls}>
+          <View style={[styles.topControls, { top: insets.top + 8 }]}>
             <TouchableOpacity
               onPress={handleClosePress}
-              style={styles.closeButton}
+              style={styles.glassCircle}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
             >
-              <Text style={styles.closeText}>✕</Text>
+              <Ionicons name="close" size={22} color={colors.text} />
             </TouchableOpacity>
+            {isListening ? (
+              <VoiceListeningIndicator
+                state={voiceState === 'listening' ? 'listening' : 'starting'}
+                words={heardWords}
+                level={voiceLevel}
+              />
+            ) : (
+              <View style={styles.positionWrap} pointerEvents="none">
+                <View style={styles.positionChip}>
+                  <Text style={styles.positionText}>
+                    {currentIndex + 1}
+                    <Text style={styles.positionTotal}>
+                      {' '}
+                      / {Math.max(totalCount, items.length).toLocaleString()}
+                    </Text>
+                  </Text>
+                </View>
+              </View>
+            )}
             <TouchableOpacity
               onPress={
                 // Debounce press: prevent double taps
@@ -1991,23 +2162,33 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
               }
               activeOpacity={0.6}
               hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              accessibilityRole="button"
+              accessibilityLabel={
+                isListening ? 'Stop voice commands' : 'Start voice commands'
+              }
               style={[
-                styles.voiceButton,
+                styles.glassCircle,
                 isListening && styles.voiceButtonActive,
               ]}
             >
-              <Text style={styles.voiceButtonText}>
-                {isListening ? 'Stop' : 'VoiceIT'}
-              </Text>
+              <Ionicons
+                name={isListening ? 'stop' : 'mic-outline'}
+                size={22}
+                color={isListening ? colors.ink : colors.text}
+              />
             </TouchableOpacity>
           </View>
 
           {/* Biggest wins first: why this item came up now, and what it costs */}
           {!!currentItem.junkReason && (
-            <View style={styles.junkBadgeWrap} pointerEvents="none">
+            <View
+              style={[styles.junkBadgeWrap, { top: insets.top + 64 }]}
+              pointerEvents="none"
+            >
               <View style={styles.junkBadge}>
+                <Ionicons name="flash" size={13} color={colors.amber} />
                 <Text style={styles.junkBadgeText}>
-                  ⚡ {currentItem.junkReason}
+                  {currentItem.junkReason}
                   {formatBytes(currentItem.size)
                     ? ` · ${formatBytes(currentItem.size)}`
                     : ''}
@@ -2019,14 +2200,20 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
           {/* Bottom Controls */}
           <View style={styles.bottomControls}>
             <TouchableOpacity
-              style={styles.controlButton}
+              style={styles.actionCircle}
               onPress={handleShare}
+              accessibilityRole="button"
+              accessibilityLabel="Share"
             >
-              <Image source={shareIcon} style={styles.controlButtonImage} />
+              <Ionicons name="share-outline" size={24} color={colors.text} />
             </TouchableOpacity>
             {currentItem.type === 'video' && (
               <TouchableOpacity
-                style={styles.controlButton}
+                style={styles.actionCircle}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  videoPaused[currentItem.id] !== false ? 'Play' : 'Pause'
+                }
                 onPress={() => {
                   if (isListening) {
                     stopVoiceRecognition();
@@ -2040,17 +2227,30 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
                   });
                 }}
               >
-                <Text style={styles.videoControlIcon}>
-                  {videoPaused[currentItem.id] !== false ? '▶️' : '⏸️'}
-                </Text>
+                <Ionicons
+                  name={
+                    videoPaused[currentItem.id] !== false ? 'play' : 'pause'
+                  }
+                  size={24}
+                  color={colors.text}
+                />
               </TouchableOpacity>
             )}
           </View>
 
           {/* Gesture Instructions */}
-          <View style={styles.instructionsContainer}>
-            <Text style={styles.instructionText}>← KEEP →</Text>
-            <Text style={styles.instructionSubText}>↑ FLICK up to TRASH</Text>
+          <View style={styles.instructionsContainer} pointerEvents="none">
+            <View style={[styles.hintPill, styles.hintPillKeep]}>
+              <Ionicons name="arrow-back" size={20} color={colors.teal} />
+              <Text style={[styles.hintText, styles.hintKeep]}>Keep</Text>
+              <Ionicons name="arrow-forward" size={20} color={colors.teal} />
+            </View>
+            <View style={[styles.hintPill, styles.hintPillFlick]}>
+              <Ionicons name="arrow-up" size={18} color={colors.coral} />
+              <Text style={[styles.hintText, styles.hintFlick]}>
+                Flick to trash
+              </Text>
+            </View>
           </View>
         </View>
       )}
@@ -2119,6 +2319,10 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
   );
 };
 
+/** Translucent dark surface for chrome floating over media */
+const GLASS = 'rgba(20, 26, 42, 0.78)';
+const GLASS_BORDER = 'rgba(255, 255, 255, 0.16)';
+
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
@@ -2126,7 +2330,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#000',
+    backgroundColor: colors.ink,
     zIndex: 1000,
   },
   loadingContainer: {
@@ -2140,7 +2344,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(11, 16, 32, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1001,
@@ -2159,15 +2363,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  verticalGestureOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'transparent',
-    pointerEvents: 'box-none', // Don't block touches, just detect gestures
-  },
   mediaWrapper: {
     width: width,
     height: height,
@@ -2177,14 +2372,6 @@ const styles = StyleSheet.create({
   media: {
     width: width,
     height: height,
-  },
-  gestureOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'transparent',
   },
   controlsOverlay: {
     position: 'absolute',
@@ -2196,272 +2383,271 @@ const styles = StyleSheet.create({
   },
   topControls: {
     position: 'absolute',
-    top: 60,
     left: 0,
     right: 0,
     flexDirection: 'row',
-    justifyContent: 'flex-start',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     zIndex: 1,
+  },
+  glassCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: GLASS,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  voiceButtonActive: {
+    backgroundColor: colors.coral,
+    borderColor: colors.coral,
+  },
+  positionWrap: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+  positionChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: GLASS,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
+  },
+  positionText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  positionTotal: {
+    color: colors.textMuted,
+    fontWeight: '600',
   },
   junkBadgeWrap: {
     position: 'absolute',
-    top: 116,
     left: 0,
     right: 0,
     alignItems: 'center',
     zIndex: 1,
   },
   junkBadge: {
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: GLASS,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
+    paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 14,
+    borderRadius: 999,
   },
   junkBadgeText: {
-    color: '#ffd166',
+    color: colors.amber,
     fontSize: 13,
     fontWeight: '700',
-  },
-  voiceButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-    marginLeft: 12,
-  },
-  voiceButtonActive: {
-    backgroundColor: 'rgba(255, 0, 0, 0.7)',
-    borderColor: 'rgba(255, 255, 255, 0.9)',
-  },
-  voiceButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  closeButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  closeText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '600',
+    marginLeft: 5,
   },
   bottomControls: {
     position: 'absolute',
-    bottom: 100,
-    right: 20,
-    flexDirection: 'column',
+    bottom: 120,
+    right: 16,
     alignItems: 'center',
   },
-  controlButton: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  actionCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: GLASS,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
     marginBottom: 12,
-  },
-  controlButtonImage: {
-    width: 48,
-    height: 48,
   },
   instructionsContainer: {
     position: 'absolute',
-    bottom: 50,
-    left: 20,
-    right: 20,
+    bottom: 64,
+    left: 16,
+    right: 16,
     alignItems: 'center',
   },
-  instructionText: {
-    color: 'rgba(255, 255, 255, 0.95)',
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 18,
-    marginBottom: 8,
+  hintPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 999,
+    backgroundColor: GLASS,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
   },
-  instructionSubText: {
-    color: 'rgba(255, 0, 0, 0.8)',
-    fontSize: 18,
-    fontWeight: '700',
-    textAlign: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  hintPillKeep: {
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderColor: 'rgba(78, 205, 196, 0.45)',
+  },
+  hintPillFlick: {
     paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 12,
+    paddingVertical: 10,
+    marginTop: 10,
+    borderColor: 'rgba(255, 122, 138, 0.45)',
+  },
+  hintText: {
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    marginHorizontal: 8,
+  },
+  hintKeep: {
+    color: colors.teal,
+    fontSize: 19,
+  },
+  hintFlick: {
+    color: colors.coral,
+    fontSize: 16,
   },
   blockedContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
-    padding: 20,
+    backgroundColor: colors.ink,
+    paddingHorizontal: 28,
   },
-  blockedIcon: {
-    fontSize: 80,
-    color: '#fff',
-    marginBottom: 10,
-  },
-  blockedTitle: {
-    fontSize: 24,
-    color: '#fff',
-    fontWeight: 'bold',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  blockedTimer: {
-    fontSize: 20,
-    color: '#fff',
-    fontWeight: '600',
-    marginBottom: 12,
-    textAlign: 'center',
-    fontFamily: 'monospace',
-  },
-  premiumDescription: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 20,
-    lineHeight: 22,
-  },
-  blockedButtonsContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 20,
-    width: '100%',
-    paddingHorizontal: 20,
-  },
-  blockedButton: {
-    backgroundColor: '#007bff',
-    paddingVertical: 12,
-    paddingHorizontal: 25,
-    borderRadius: 8,
-    flex: 1,
+  blockedIconWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: 'rgba(255, 122, 138, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 122, 138, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 20,
   },
-  premiumButton: {
-    backgroundColor: '#28a745',
+  blockedSubtitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginTop: 4,
+    marginBottom: 32,
   },
-  blockedButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  blockedPrimary: {
+    alignSelf: 'stretch',
+    minHeight: 60,
+    borderRadius: 16,
+    backgroundColor: colors.teal,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
   },
-  restoreButton: {
+  blockedPrimaryText: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.ink,
+  },
+  blockedPrimarySub: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(11, 16, 32, 0.7)',
+    marginTop: 2,
+  },
+  blockedSecondary: {
+    marginTop: 14,
     paddingVertical: 12,
     paddingHorizontal: 24,
-    alignItems: 'center',
-    marginTop: 12,
   },
-  restoreButtonText: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
+  blockedSecondaryText: {
+    fontSize: 15,
     fontWeight: '600',
-    textDecorationLine: 'underline',
+    color: colors.textSecondary,
+  },
+  blockedIcon: {
+    fontSize: 40,
+  },
+  blockedTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 18,
+  },
+  blockedTimer: {
+    fontSize: 48,
+    fontWeight: '800',
+    color: colors.coral,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 1,
   },
   videoErrorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
+    backgroundColor: colors.ink,
+    paddingHorizontal: 32,
   },
-  videoErrorIcon: {
-    fontSize: 64,
+  videoErrorIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 122, 138, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 122, 138, 0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 16,
   },
   videoErrorTitle: {
-    color: '#fff',
+    color: colors.text,
     fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 8,
+    fontWeight: '800',
+    marginBottom: 6,
     textAlign: 'center',
   },
   videoErrorText: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 16,
+    color: colors.textSecondary,
+    fontSize: 15,
     textAlign: 'center',
-  },
-  videoControlsOverlay: {
-    position: 'absolute',
-    bottom: 100,
-    left: 0,
-    right: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1001,
-  },
-  videoControlButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  videoControlIcon: {
-    fontSize: 48,
   },
   onlyOneMessageContainer: {
     position: 'absolute',
     top: '50%',
-    left: 20,
-    right: 20,
-    transform: [{ translateY: -25 }],
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    left: 24,
+    right: 24,
+    transform: [{ translateY: -28 }],
+    backgroundColor: 'rgba(20, 26, 42, 0.94)',
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
     paddingHorizontal: 20,
-    paddingVertical: 15,
-    borderRadius: 12,
+    paddingVertical: 16,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1001,
   },
   onlyOneMessageText: {
-    color: '#fff',
-    fontSize: 16,
+    color: colors.text,
+    fontSize: 15,
     fontWeight: '600',
     textAlign: 'center',
   },
   viewedBadge: {
     position: 'absolute',
-    top: 80,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 255, 136, 0.9)',
-    justifyContent: 'center',
+    right: 16,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#00FF88',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(78, 205, 196, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(78, 205, 196, 0.45)',
     zIndex: 10,
   },
-  viewedCheckmark: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '900',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+  viewedBadgeText: {
+    color: colors.teal,
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 5,
   },
   voiceTutorialOverlay: {
     position: 'absolute',
@@ -2469,21 +2655,25 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    backgroundColor: 'rgba(5, 8, 20, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 2000,
   },
   voiceTutorialContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 20,
+    backgroundColor: colors.sheet,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
     padding: 24,
+    paddingTop: 28,
     marginHorizontal: 20,
-    maxWidth: width * 0.85,
+    maxWidth: width * 0.88,
+    alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
     elevation: 10,
   },
   voiceTutorialCloseButton: {
@@ -2493,37 +2683,42 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    backgroundColor: colors.surfaceRaised,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1,
   },
-  voiceTutorialCloseText: {
-    color: '#000',
-    fontSize: 18,
-    fontWeight: '600',
+  voiceTutorialIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(78, 205, 196, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(78, 205, 196, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
   },
   voiceTutorialTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000',
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.text,
     textAlign: 'center',
-    marginBottom: 20,
-    marginTop: 8,
+    marginBottom: 14,
   },
   voiceTutorialContent: {
-    marginTop: 8,
+    alignSelf: 'stretch',
   },
   voiceTutorialText: {
-    fontSize: 18,
-    color: '#333',
+    fontSize: 16,
+    color: colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 28,
-    marginBottom: 16,
+    lineHeight: 24,
+    marginBottom: 12,
   },
   voiceTutorialHighlight: {
-    fontWeight: 'bold',
-    color: '#667eea',
+    fontWeight: '800',
+    color: colors.teal,
   },
   bannerAdContainer: {
     position: 'absolute',
@@ -2545,75 +2740,81 @@ const styles = StyleSheet.create({
   },
   endOfMonthBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    backgroundColor: 'rgba(5, 8, 20, 0.6)',
   },
   endOfMonthSheet: {
-    backgroundColor: '#1c1c1e',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingTop: 12,
+    backgroundColor: colors.sheet,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 24,
+    paddingTop: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 16,
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    elevation: 24,
   },
   endOfMonthHandle: {
     alignSelf: 'center',
     width: 40,
     height: 5,
     borderRadius: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    marginBottom: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    marginBottom: 18,
   },
   endOfMonthTitle: {
-    color: '#fff',
+    color: colors.text,
     fontSize: 22,
-    fontWeight: '700',
+    fontWeight: '800',
     textAlign: 'center',
     marginBottom: 8,
   },
   endOfMonthBody: {
-    color: 'rgba(255, 255, 255, 0.75)',
-    fontSize: 16,
-    lineHeight: 22,
+    color: colors.textSecondary,
+    fontSize: 15,
+    lineHeight: 21,
     textAlign: 'center',
     marginBottom: 20,
   },
   endOfMonthPrimaryButton: {
-    backgroundColor: '#667eea',
-    borderRadius: 14,
-    paddingVertical: 14,
+    backgroundColor: colors.teal,
+    borderRadius: 16,
+    minHeight: 60,
+    paddingVertical: 12,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
   },
   endOfMonthPrimaryText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: '800',
   },
   endOfMonthPrimaryHint: {
-    color: 'rgba(255, 255, 255, 0.85)',
-    fontSize: 14,
+    color: 'rgba(11, 16, 32, 0.7)',
+    fontSize: 12,
+    fontWeight: '600',
     marginTop: 2,
   },
   endOfMonthNote: {
-    color: 'rgba(255, 255, 255, 0.6)',
+    color: colors.textMuted,
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 12,
   },
   endOfMonthSecondaryButton: {
-    borderRadius: 14,
-    paddingVertical: 14,
+    borderRadius: 16,
+    minHeight: 52,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   endOfMonthSecondaryText: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '600',
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
 
