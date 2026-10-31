@@ -77,12 +77,14 @@ interface MediaViewerProps {
 
 const { width, height } = Dimensions.get('window');
 
-// Months that carry progress and can be finished; filters and duplicates cannot
+// Months that carry progress and can be finished; filters, duplicates and the
+// whole-library size scan cannot
 const isTrackableMonth = (key?: string): key is string =>
   !!key &&
   key !== 'DUPLICATES' &&
   !key.startsWith('TIME_FILTER_') &&
-  !key.startsWith('SOURCE_FILTER_');
+  !key.startsWith('SOURCE_FILTER_') &&
+  !key.startsWith('SIZE_SCAN');
 
 // Where the end-of-month sheet sits while hidden (below the screen edge)
 const END_OF_MONTH_SHEET_HIDDEN_Y = 480;
@@ -902,7 +904,8 @@ const MediaViewer: React.FC<MediaViewerProps> = ({
         currentMonthKey &&
         currentMonthKey !== 'DUPLICATES' &&
         !currentMonthKey.startsWith('TIME_FILTER_') &&
-        !currentMonthKey.startsWith('SOURCE_FILTER_')
+        !currentMonthKey.startsWith('SOURCE_FILTER_') &&
+        !currentMonthKey.startsWith('SIZE_SCAN')
       ) {
         import('../utils/viewedMediaTracker').then(
           ({ setLastViewedItemId }) => {

@@ -443,6 +443,72 @@ RCT_REMAP_METHOD(fetchMonthPhotosRanked,
   resolve(results);
 }
 
+#pragma mark - Whole-library size scan
+
+// A page of the ENTIRE library, biggest first. PhotoKit cannot sort by bytes, so the
+// order comes from the same metadata proxy the month ranking uses (pixels × duration);
+// real bytes are read only for the returned page.
+RCT_REMAP_METHOD(fetchLibraryBySize,
+                 sizeOffset:(nonnull NSNumber *)offset
+                 sizeLimit:(nonnull NSNumber *)limit
+                 sizeResolver:(RCTPromiseResolveBlock)resolve
+                 sizeRejecter:(RCTPromiseRejectBlock)reject)
+{
+  PHFetchOptions *assetOptions = [[PHFetchOptions alloc] init];
+  assetOptions.predicate = [NSPredicate predicateWithFormat:@"mediaType = %d OR mediaType = %d",
+                            PHAssetMediaTypeImage, PHAssetMediaTypeVideo];
+  PHFetchResult<PHAsset *> *allAssets = [PHAsset fetchAssetsWithOptions:assetOptions];
+
+  NSMutableArray<NSDictionary *> *ranked = [NSMutableArray arrayWithCapacity:allAssets.count];
+  for (PHAsset *asset in allAssets) {
+    NSString *reason = @"Photo";
+    double proxy = 0;
+    NSInteger bucket = JunkBucketForAsset(asset, &reason, &proxy);
+    [ranked addObject:@{
+      @"asset": asset,
+      @"bucket": @(bucket),
+      @"proxy": @(proxy),
+      @"reason": reason
+    }];
+  }
+
+  // Pure size order: the proxy alone decides, no bucket priority
+  [ranked sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+    double proxyA = [a[@"proxy"] doubleValue];
+    double proxyB = [b[@"proxy"] doubleValue];
+    if (proxyA != proxyB) {
+      return proxyA > proxyB ? NSOrderedAscending : NSOrderedDescending;
+    }
+    return NSOrderedSame;
+  }];
+
+  NSInteger count = (NSInteger)ranked.count;
+  NSInteger from = MAX(0, MIN(count, [offset integerValue]));
+  NSInteger to = MIN(count, from + MAX(0, [limit integerValue]));
+
+  NSMutableArray *results = [NSMutableArray arrayWithCapacity:MAX(0, to - from)];
+  for (NSInteger i = from; i < to; i++) {
+    NSDictionary *entry = ranked[i];
+    PHAsset *asset = entry[@"asset"];
+    NSString *assetURI = [NSString stringWithFormat:@"ph://%@", asset.localIdentifier];
+    NSTimeInterval ts = asset.creationDate ? [asset.creationDate timeIntervalSince1970] * 1000 : 0;
+    [results addObject:@{
+      @"id": asset.localIdentifier,
+      @"uri": assetURI,
+      @"type": asset.mediaType == PHAssetMediaTypeVideo ? @"video" : @"photo",
+      @"timestamp": @(ts),
+      @"source": @"Gallery",
+      @"filename": [NSString stringWithFormat:@"photo_%@", asset.localIdentifier],
+      @"size": @(FileSizeForAsset(asset)),
+      @"junkReason": entry[@"reason"],
+      @"junkRank": entry[@"bucket"]
+    }];
+  }
+
+  NSLog(@"[PhotoMonths] fetchLibraryBySize: %ld assets scanned, returning %lu", (long)count, (unsigned long)results.count);
+  resolve(results);
+}
+
 #pragma mark - Ghost Album
 
 // Writes a small JPEG of the asset to destPath and reports the original's size, so a

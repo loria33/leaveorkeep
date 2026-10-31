@@ -6,7 +6,6 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
-  SafeAreaView,
   StatusBar,
   Alert,
   TouchableOpacity,
@@ -14,7 +13,10 @@ import {
   Platform,
   Dimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import {
   ParamListBase,
   useFocusEffect,
@@ -59,6 +61,7 @@ import {
   loadViewedItems,
   getLastViewedItemId,
 } from '../utils/viewedMediaTracker';
+import { SIZE_SCAN_KEY } from '../utils/sortMode';
 
 const MONTH_FILTER_OPTIONS = [
   { key: 'all', label: 'All' },
@@ -241,6 +244,7 @@ const Home: React.FC = () => {
   const [hideTimeFilters, setHideTimeFilters] = useState(false);
   const [hideSourceFilters, setHideSourceFilters] = useState(false);
   const [timeFilterItems, setTimeFilterItems] = useState<MediaItem[]>([]);
+  const [sizeScanLoading, setSizeScanLoading] = useState(false);
   const [specialFiltersCollapsed, setSpecialFiltersCollapsed] = useState(true);
   const [monthCompletionStatus, setMonthCompletionStatus] = useState<{
     [monthKey: string]: boolean;
@@ -334,6 +338,7 @@ const Home: React.FC = () => {
     // Refresh completion status and progress for the month that was being viewed
     if (
       viewingMonth &&
+      viewingMonth !== SIZE_SCAN_KEY &&
       !viewingMonth.startsWith('TIME_FILTER_') &&
       !viewingMonth.startsWith('SOURCE_FILTER_')
     ) {
@@ -886,12 +891,33 @@ const Home: React.FC = () => {
     }
   };
 
+  // Whole-library size scan: opens the viewer on the biggest files first.
+  // Pages through the normal month pipeline via the SIZE_SCAN_KEY pseudo month.
+  const handleSizeScanPress = async () => {
+    if (sizeScanLoading) return;
+    hapticTap();
+    setSizeScanLoading(true);
+    try {
+      const items = await loadMonthContent(SIZE_SCAN_KEY, 20);
+      if (items.length > 0) {
+        setViewerInitialIndex(0);
+        setViewerVisible(true);
+        setCurrentViewingMonth(SIZE_SCAN_KEY);
+      } else {
+        Alert.alert('No Media', 'Could not scan your library by size');
+      }
+    } finally {
+      setSizeScanLoading(false);
+    }
+  };
+
   const handleViewProgress = async (
     viewedCount: number,
     _totalCount?: number,
   ) => {
     if (
       currentViewingMonth &&
+      currentViewingMonth !== SIZE_SCAN_KEY &&
       !currentViewingMonth.startsWith('TIME_FILTER_') &&
       !currentViewingMonth.startsWith('SOURCE_FILTER_')
     ) {
@@ -1514,6 +1540,33 @@ const Home: React.FC = () => {
                 </View>
               )}
 
+              {/* Whole-library size scan */}
+              <TouchableOpacity
+                style={styles.sizeScanCard}
+                onPress={handleSizeScanPress}
+                activeOpacity={0.8}
+                disabled={sizeScanLoading}
+                accessibilityRole="button"
+              >
+                <View
+                  style={[
+                    styles.sizeScanIconCircle,
+                    { backgroundColor: theme.accent },
+                  ]}
+                >
+                  <Text style={styles.sizeScanIcon}>📦</Text>
+                </View>
+                <View style={styles.sizeScanTextCol}>
+                  <Text style={styles.sizeScanTitle}>Biggest files</Text>
+                  <Text style={styles.sizeScanSubtitle} numberOfLines={1}>
+                    {sizeScanLoading
+                      ? 'Scanning your library…'
+                      : 'All photos & videos, largest first'}
+                  </Text>
+                </View>
+                <Text style={styles.sizeScanChevron}>›</Text>
+              </TouchableOpacity>
+
               {/* Month filter: segmented control */}
               <View style={styles.segmented}>
                 {MONTH_FILTER_OPTIONS.map(({ key, label }) => {
@@ -1828,6 +1881,51 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
     backgroundColor: 'transparent',
+  },
+  sizeScanCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginTop: 6,
+    marginBottom: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sizeScanIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  sizeScanIcon: {
+    fontSize: 18,
+  },
+  sizeScanTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sizeScanTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  sizeScanSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  sizeScanChevron: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginLeft: 8,
   },
   segmented: {
     flexDirection: 'row',

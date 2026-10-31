@@ -7,12 +7,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  SafeAreaView,
   StatusBar,
   Dimensions,
   Image,
   Modal,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useMedia } from '../context/MediaContext';
 import { GhostEntry, ghostImageUri, ghostStats } from '../utils/ghostAlbum';

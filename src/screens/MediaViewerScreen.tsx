@@ -70,7 +70,8 @@ const MediaViewerScreen: React.FC = () => {
   const isTrackableMonth =
     !!monthKey &&
     !monthKey.startsWith('TIME_FILTER_') &&
-    !monthKey.startsWith('SOURCE_FILTER_');
+    !monthKey.startsWith('SOURCE_FILTER_') &&
+    !monthKey.startsWith('SIZE_SCAN');
 
   // The month after this one in the Home list (newest first), offered once it is finished
   const nextMonth = useMemo<MediaViewerNextMonth | null>(() => {

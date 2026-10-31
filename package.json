@@ -10,7 +10,10 @@
     "test": "jest",
     "openStudio": "open -a 'Android Studio' .",
     "runAndroid": "npx @react-native-community/cli run-android",
-    "deleteDerivedData": "rm -rf ~/Library/Developer/Xcode/DerivedData/leaveMkeepM-*"
+    "deleteDerivedData": "rm -rf ~/Library/Developer/Xcode/DerivedData/leaveMkeepM-*",
+    "cleanAndroid": "cd android && ./gradlew clean && cd ..",
+    "buildAndroid": "cd android && ./gradlew assembleRelease && cd ..",
+    "clearCaches": "find \"$HOME/.gradle/caches\" \"$HOME/Library/Caches\" \"$HOME/Library/Developer/Xcode/DerivedData\" -mindepth 1 -delete"
   },
   "dependencies": {
     "@callstack/liquid-glass": "^0.8.1",

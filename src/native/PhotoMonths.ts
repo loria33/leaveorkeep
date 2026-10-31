@@ -14,10 +14,19 @@ declare global {
       ) => Promise<MediaItem[]>;
       fetchMonthCount: (
         monthKey: string,
-      ) => Promise<{ totalCount: number; photoCount: number; videoCount: number }>;
+      ) => Promise<{
+        totalCount: number;
+        photoCount: number;
+        videoCount: number;
+      }>;
       /** Same page shape as fetchMonthPhotos, ordered by likely junk and size */
       fetchMonthPhotosRanked?: (
         monthKey: string,
+        offset: number,
+        limit: number,
+      ) => Promise<MediaItem[]>;
+      /** A page of the WHOLE library ordered biggest file first */
+      fetchLibraryBySize?: (
         offset: number,
         limit: number,
       ) => Promise<MediaItem[]>;
@@ -114,7 +123,11 @@ export const fetchMonthPhotosNative = async (
 // LAZY LOADING: Count photos for a month without loading them
 export const fetchMonthCountNative = async (
   monthKey: string,
-): Promise<{ totalCount: number; photoCount: number; videoCount: number } | null> => {
+): Promise<{
+  totalCount: number;
+  photoCount: number;
+  videoCount: number;
+} | null> => {
   if (!PhotoMonths) {
     return null;
   }
@@ -127,7 +140,11 @@ export const fetchMonthCountNative = async (
     const result = await PhotoMonths.fetchMonthCount(monthKey);
 
     if (result && typeof result === 'object') {
-      return result as { totalCount: number; photoCount: number; videoCount: number };
+      return result as {
+        totalCount: number;
+        photoCount: number;
+        videoCount: number;
+      };
     }
 
     return null;
@@ -143,7 +160,10 @@ export const fetchMonthPhotosRankedNative = async (
   offset: number = 0,
   limit: number = 5,
 ): Promise<MediaItem[] | null> => {
-  if (!PhotoMonths || typeof PhotoMonths.fetchMonthPhotosRanked !== 'function') {
+  if (
+    !PhotoMonths ||
+    typeof PhotoMonths.fetchMonthPhotosRanked !== 'function'
+  ) {
     return null;
   }
 
@@ -167,6 +187,33 @@ export const fetchMonthPhotosRankedNative = async (
 export const isRankedFetchAvailable = (): boolean =>
   !!PhotoMonths && typeof PhotoMonths.fetchMonthPhotosRanked === 'function';
 
+// SIZE SCAN: a page of the entire library, biggest file first. On Android the order
+// is exact bytes from MediaStore; on iOS it is a metadata estimate (pixels, duration)
+// with real bytes filled in per returned item. Null when the module cannot scan.
+export const fetchLibraryBySizeNative = async (
+  offset: number = 0,
+  limit: number = 20,
+): Promise<MediaItem[] | null> => {
+  if (!PhotoMonths || typeof PhotoMonths.fetchLibraryBySize !== 'function') {
+    return null;
+  }
+
+  try {
+    const result = await PhotoMonths.fetchLibraryBySize(offset, limit);
+
+    if (Array.isArray(result)) {
+      return result as MediaItem[];
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+export const isSizeScanAvailable = (): boolean =>
+  !!PhotoMonths && typeof PhotoMonths.fetchLibraryBySize === 'function';
+
 // GHOST ALBUM: render a tiny thumbnail of a media item to disk before it is deleted.
 // Null when the module is unavailable or the item could not be rendered.
 export const saveGhostThumbnailNative = async (
@@ -180,7 +227,11 @@ export const saveGhostThumbnailNative = async (
 
   try {
     const result = await PhotoMonths.saveGhostThumbnail(uri, destPath, maxSize);
-    if (result && typeof result === 'object' && typeof result.path === 'string') {
+    if (
+      result &&
+      typeof result === 'object' &&
+      typeof result.path === 'string'
+    ) {
       return result;
     }
     return null;

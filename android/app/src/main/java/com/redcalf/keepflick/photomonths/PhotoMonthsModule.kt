@@ -536,6 +536,93 @@ class PhotoMonthsModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    // ===== Whole-library size scan =====
+
+    /**
+     * One page of the entire library ordered by bytes on disk, biggest first.
+     * MediaStore sorts on its SIZE column, so even huge libraries page quickly.
+     */
+    @ReactMethod
+    fun fetchLibraryBySize(offset: Int, limit: Int, promise: Promise) {
+        val startTime = System.currentTimeMillis()
+        try {
+            val projection = arrayOf(
+                MediaStore.Files.FileColumns._ID,
+                MediaStore.Files.FileColumns.MEDIA_TYPE,
+                MediaStore.Images.Media.DATE_TAKEN,
+                MediaStore.Files.FileColumns.DATE_ADDED,
+                MediaStore.Files.FileColumns.DISPLAY_NAME,
+                MediaStore.Files.FileColumns.SIZE,
+                MediaStore.Files.FileColumns.RELATIVE_PATH
+            )
+
+            val selection =
+                "(${MediaStore.Files.FileColumns.MEDIA_TYPE}=? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE}=?)"
+            val selectionArgs = arrayOf(
+                MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
+                MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString()
+            )
+
+            val result = Arguments.createArray()
+
+            reactContext.contentResolver.query(
+                externalUri,
+                projection,
+                selection,
+                selectionArgs,
+                "${MediaStore.Files.FileColumns.SIZE} DESC"
+            )?.use { cursor ->
+                val idIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns._ID)
+                val typeIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.MEDIA_TYPE)
+                val dateTakenIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
+                val dateAddedIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATE_ADDED)
+                val nameIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.SIZE)
+                val pathIndex = cursor.getColumnIndex(MediaStore.Files.FileColumns.RELATIVE_PATH)
+
+                val from = offset.coerceAtLeast(0)
+                if (from > 0 && !cursor.moveToPosition(from - 1)) return@use
+
+                while (result.size() < limit && cursor.moveToNext()) {
+                    val type = cursor.getInt(typeIndex)
+                    val isVideo = type == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+                    val id = cursor.getLong(idIndex)
+                    val displayName = cursor.getString(nameIndex) ?: "media"
+                    val relativePath = if (pathIndex >= 0) cursor.getString(pathIndex) else null
+                    val (bucket, reason) = classifyRow(type, displayName, relativePath)
+                    val contentUri: Uri = if (isVideo) {
+                        ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                    } else {
+                        ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                    }
+
+                    val map = Arguments.createMap()
+                    map.putString("id", id.toString())
+                    map.putString("uri", contentUri.toString())
+                    map.putString("type", if (isVideo) "video" else "photo")
+                    map.putDouble(
+                        "timestamp",
+                        resolveTimestampMillis(cursor, dateTakenIndex, dateAddedIndex).toDouble()
+                    )
+                    map.putString("source", "Gallery")
+                    map.putString("filename", displayName)
+                    map.putDouble("size", (cursor.getOptionalLong(sizeIndex) ?: 0L).toDouble())
+                    map.putString("junkReason", reason)
+                    map.putInt("junkRank", bucket)
+                    result.pushMap(map)
+                }
+            }
+
+            Log.d(
+                "PhotoMonths",
+                "fetchLibraryBySize: ${System.currentTimeMillis() - startTime} ms, offset=$offset, returned=${result.size()}"
+            )
+            promise.resolve(result)
+        } catch (e: Exception) {
+            promise.reject("ERR_PHOTO_QUERY", "Failed to fetch library by size", e)
+        }
+    }
+
     // ===== Ghost Album =====
 
     /**

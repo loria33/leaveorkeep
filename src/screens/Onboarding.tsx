@@ -1,36 +1,52 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  Image,
+  Linking,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
   Text,
   TouchableOpacity,
-  StyleSheet,
-  Dimensions,
-  SafeAreaView,
-  StatusBar,
-  Alert,
-  ScrollView,
-  Linking,
-  Image,
-  Animated,
-  Platform,
-  ActivityIndicator,
+  View,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
+import RNFS from 'react-native-fs';
+import NetInfo from '@react-native-community/netinfo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMedia } from '../context/MediaContext';
 import {
   requestMediaPermissions,
   checkMediaPermissionsWithRetry,
   requestMicrophonePermission,
 } from '../utils/permissions';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { APP_CONFIG } from '../constants/app';
+import ScreenBackground from '../components/ScreenBackground';
+import {
+  colors,
+  getSkinTheme,
+  radius,
+  Skin,
+  SkinTheme,
+  skinThemes,
+} from '../theme';
+import { hapticTap } from '../utils/haptics';
 
-// NEW: add these imports
-import RNFS from 'react-native-fs';
-import NetInfo from '@react-native-community/netinfo';
-import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions';
-import { APP_CONFIG } from '../constants/app'; // make sure path matches your project
-import AsyncStorage from '@react-native-async-storage/async-storage';
+/**
+ * Onboarding - the first-run walkthrough, drawn with the same dark gradient,
+ * glass cards and accent buttons as the rest of the app. Picking a theme on
+ * the theme step recolours the whole screen live so the choice is a preview.
+ */
 
 const { width, height } = Dimensions.get('window');
 
@@ -317,29 +333,6 @@ const PHRASES = [
   'Cropping photo corners',
 ];
 
-const PHRASE_COLORS = [
-  '#FF6B6B', // Red
-  '#4ECDC4', // Teal
-  '#FFD93D', // Yellow
-  '#1A535C', // Dark teal
-  '#FFB6B9', // Pink
-  '#6A89CC', // Blue
-  '#38ADA9', // Green
-  '#F8A5C2', // Light pink
-  '#60A3D9', // Sky blue
-  '#F6D365', // Light yellow
-  '#B8E994', // Light green
-  '#F3A683', // Orange
-  '#786FA6', // Purple
-  '#574B90', // Deep purple
-  '#3DC1D3', // Cyan
-  '#E17055', // Coral
-  '#00B894', // Emerald
-  '#00B8D4', // Bright blue
-  '#F9CA24', // Gold
-  '#EA8685', // Soft red
-];
-
 const isSmallScreen = height < 700;
 const isMediumScreen = height >= 700 && height < 800;
 const getResponsiveSize = (small: number, medium: number, large: number) => {
@@ -348,87 +341,122 @@ const getResponsiveSize = (small: number, medium: number, large: number) => {
   return large;
 };
 
-const responsiveValues = {
-  topPadding: getResponsiveSize(height * 0.03, height * 0.05, height * 0.06),
-  bottomPadding: getResponsiveSize(height * 0.03, height * 0.04, height * 0.05),
-  progressMargin: getResponsiveSize(
-    height * 0.03,
-    height * 0.05,
-    height * 0.06,
-  ),
-  iconSize: getResponsiveSize(60, 70, 80),
-  titleSize: getResponsiveSize(24, 26, 28),
-  subtitleSize: getResponsiveSize(16, 17, 18),
-  descriptionSize: getResponsiveSize(14, 15, 16),
-  iconMargin: getResponsiveSize(height * 0.02, height * 0.03, height * 0.04),
-  titleMargin: getResponsiveSize(8, 10, 12),
-  subtitleMargin: getResponsiveSize(12, 16, 20),
-  buttonPadding: getResponsiveSize(10, 12, 14),
-  buttonText: getResponsiveSize(14, 15, 16),
-};
+const HERO_SIZE = getResponsiveSize(84, 96, 108);
+const HERO_ICON_SIZE = Math.round(HERO_SIZE * 0.44);
+const TITLE_SIZE = getResponsiveSize(26, 28, 30);
+const BODY_SIZE = getResponsiveSize(15, 15, 16);
 
-// ⚠️ We inserted two new steps: Whisper download & Microphone permission
-const onboardingSteps = [
+type StepType =
+  | 'privacy'
+  | 'theme_selection'
+  | 'whisper_download'
+  | 'microphone_permission'
+  | 'interactive_swipe';
+
+interface Highlight {
+  /** Ionicons glyph */
+  icon: string;
+  text: string;
+}
+
+interface OnboardingStep {
+  type?: StepType;
+  /** Ionicons glyph for the hero ring; the welcome step shows the brand mark instead */
+  icon: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  highlights?: Highlight[];
+}
+
+const onboardingSteps: OnboardingStep[] = [
   {
-    title: 'Welcome to KeepFlick! 🎉',
+    icon: 'sparkles-outline',
+    title: 'Welcome to KeepFlick',
     subtitle: 'Your smart media cleanup companion',
     description:
-      'Transform your cluttered photo gallery into a organized masterpiece. Clean up your memories with style!',
-    icon: '📱',
+      'Turn a cluttered gallery into an organized one. Flick through your memories and keep only what matters.',
+    highlights: [
+      { icon: 'hand-left-outline', text: 'Swipe to keep or flick away' },
+      { icon: 'calendar-outline', text: 'Everything grouped by month' },
+      { icon: 'lock-closed-outline', text: 'Private, and on your device' },
+    ],
   },
   {
-    title: 'Smart Organization 🗂️',
+    icon: 'calendar-outline',
+    title: 'Smart organization',
     subtitle: 'Photos grouped by month and source',
     description:
-      'We organize your photos by month and source (WhatsApp, Camera, Screenshots, etc.) making it super easy to find what you need.',
-    icon: '📅',
+      'Your library is sorted by month and by where each photo came from, so the right ones are always easy to find.',
+    highlights: [
+      { icon: 'logo-whatsapp', text: 'WhatsApp photos and videos' },
+      { icon: 'camera-outline', text: 'Camera roll' },
+      { icon: 'phone-portrait-outline', text: 'Screenshots' },
+    ],
   },
   {
-    title: 'Safe & Secure 🔒',
+    icon: 'shield-checkmark-outline',
+    title: 'Safe & secure',
     subtitle: 'Nothing is deleted immediately',
     description:
-      'When you choose to "trash" a photo, it goes to our safe trash can. You can restore it anytime or delete it permanently later.',
-    icon: '🗑️',
+      "Flicked photos go to KeepFlick's trash first. Restore them any time, or empty the trash once you're sure.",
+    highlights: [
+      { icon: 'trash-outline', text: 'Flicked items wait in the trash' },
+      { icon: 'refresh-outline', text: 'Restore them with one tap' },
+      {
+        icon: 'checkmark-circle-outline',
+        text: 'Delete for good only when you say so',
+      },
+    ],
   },
   {
-    title: 'Privacy & Usage Agreement 📋',
+    type: 'privacy',
+    icon: 'document-text-outline',
+    title: 'Privacy & usage',
     subtitle: 'Please review and accept our terms',
     description:
       'Before we can help organize your photos, please review our privacy policy and usage agreement.',
-    icon: '📋',
   },
   {
     type: 'theme_selection',
-    title: 'Choose Your Theme 🎨',
-    subtitle: 'Pick your favorite color',
-    description: 'Select a theme that matches your style',
-    icon: '🎨',
+    icon: 'color-palette-outline',
+    title: 'Choose your look',
+    subtitle: 'Pick an accent colour',
+    description: 'You can change this any time from the home screen.',
   },
   // // NEW STEP (Whisper download)
   // {
   //   type: 'whisper_download',
-  //   title: 'Download Transcription Model',
+  //   icon: 'cloud-download-outline',
+  //   title: 'Download transcription model',
   //   subtitle: 'Enables on-device voice-to-text',
   //   description: '',
-  //   icon: '🎤',
   // },
   // // NEW STEP (Microphone permission)
   // {
   //   type: 'microphone_permission',
-  //   title: 'Microphone Permission',
+  //   icon: 'mic-outline',
+  //   title: 'Microphone permission',
   //   subtitle: 'Required for voice transcription',
   //   description:
   //     'We only use the mic locally on your device for voice-to-text. Nothing is uploaded.',
-  //   icon: '🎙️',
   // },
   {
-    title: 'Ready to Start? 🚀',
-    subtitle: 'We need permission to access your photos',
+    icon: 'images-outline',
+    title: 'Ready to start?',
+    subtitle: 'KeepFlick needs access to your photos',
     description:
-      'To organize your photos, we need permission to access your media library. Your photos stay private and secure on your device.',
-    icon: '🔐',
+      'Allow photo access so KeepFlick can organize your library month by month. Your photos never leave your device.',
+    highlights: [
+      { icon: 'cloud-offline-outline', text: 'No uploads, ever' },
+      { icon: 'eye-off-outline', text: 'Nothing is shared or tracked' },
+      { icon: 'settings-outline', text: 'Change access any time in Settings' },
+    ],
   },
 ];
+
+const PRIVACY_STEP = onboardingSteps.findIndex(s => s.type === 'privacy');
+const LAST_STEP = onboardingSteps.length - 1;
 
 const privacyAgreementText = `
 PRIVACY POLICY AND USAGE AGREEMENT
@@ -478,7 +506,204 @@ Last Updated: ${new Date().toLocaleDateString()}
 For questions regarding this agreement, please discontinue use of the application.
 `;
 
+const BRAND_MARK = require('../assets/kf-mark.png');
 const LOGO_IMAGE = require('../assets/logoinApp.png');
+
+// --- Shared building blocks -------------------------------------------------
+
+/** Thin accent segments, one per step, with a "current / total" counter */
+const StepProgress: React.FC<{ current: number; accent: string }> = ({
+  current,
+  accent,
+}) => (
+  <View style={styles.progressRow}>
+    <View style={styles.progressTrack}>
+      {onboardingSteps.map((_, index) => (
+        <View
+          key={index}
+          style={[
+            styles.progressSegment,
+            index <= current && { backgroundColor: accent },
+          ]}
+        />
+      ))}
+    </View>
+    <Text style={styles.progressLabel}>
+      {current + 1}/{onboardingSteps.length}
+    </Text>
+  </View>
+);
+
+/** Glass ring holding either an accent-coloured glyph or the brand mark */
+const StepHero: React.FC<{
+  icon: string;
+  theme: SkinTheme;
+  brand?: boolean;
+}> = ({ icon, theme, brand }) => (
+  <View
+    style={[
+      styles.heroRing,
+      { backgroundColor: theme.accentSoft, borderColor: theme.accentBorder },
+    ]}
+  >
+    {brand ? (
+      <Image source={BRAND_MARK} style={styles.heroMark} resizeMode="contain" />
+    ) : (
+      <Ionicons name={icon} size={HERO_ICON_SIZE} color={theme.accent} />
+    )}
+  </View>
+);
+
+const StepCopy: React.FC<{ step: OnboardingStep; theme: SkinTheme }> = ({
+  step,
+  theme,
+}) => (
+  <>
+    <Text style={styles.title}>{step.title}</Text>
+    <Text style={[styles.subtitle, { color: theme.accent }]}>
+      {step.subtitle}
+    </Text>
+    {step.description.length > 0 && (
+      <Text style={styles.description}>{step.description}</Text>
+    )}
+  </>
+);
+
+const HighlightCard: React.FC<{
+  highlights: Highlight[];
+  theme: SkinTheme;
+}> = ({ highlights, theme }) => (
+  <View style={styles.highlightCard}>
+    {highlights.map((item, index) => (
+      <View
+        key={item.text}
+        style={[
+          styles.highlightRow,
+          index < highlights.length - 1 && styles.highlightRowDivider,
+        ]}
+      >
+        <View
+          style={[
+            styles.highlightIconWrap,
+            { backgroundColor: theme.accentSoft },
+          ]}
+        >
+          <Ionicons name={item.icon} size={18} color={theme.accent} />
+        </View>
+        <Text style={styles.highlightText}>{item.text}</Text>
+      </View>
+    ))}
+  </View>
+);
+
+interface FooterProps {
+  theme: SkinTheme;
+  bottomInset: number;
+  primaryLabel: string;
+  onPrimary: () => void;
+  primaryDisabled?: boolean;
+  primaryLoading?: boolean;
+  onBack?: () => void;
+  backDisabled?: boolean;
+}
+
+/** Compact glass "Back" beside a full-width accent action */
+const StepFooter: React.FC<FooterProps> = ({
+  theme,
+  bottomInset,
+  primaryLabel,
+  onPrimary,
+  primaryDisabled,
+  primaryLoading,
+  onBack,
+  backDisabled,
+}) => (
+  <View style={[styles.footer, { paddingBottom: Math.max(bottomInset, 20) }]}>
+    {onBack && (
+      <TouchableOpacity
+        style={[styles.backButton, backDisabled && styles.buttonDimmed]}
+        onPress={onBack}
+        disabled={backDisabled}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+      >
+        <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
+        <Text style={styles.backButtonText}>Back</Text>
+      </TouchableOpacity>
+    )}
+    <TouchableOpacity
+      style={[
+        styles.primaryButton,
+        { backgroundColor: theme.accent },
+        primaryDisabled && styles.primaryButtonDisabled,
+      ]}
+      onPress={onPrimary}
+      disabled={primaryDisabled || primaryLoading}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!primaryDisabled }}
+    >
+      {primaryLoading ? (
+        <ActivityIndicator color={theme.accentInk} />
+      ) : (
+        <Text
+          style={[
+            styles.primaryButtonText,
+            { color: theme.accentInk },
+            primaryDisabled && styles.primaryButtonTextDisabled,
+          ]}
+        >
+          {primaryLabel}
+        </Text>
+      )}
+    </TouchableOpacity>
+  </View>
+);
+
+/** A theme card: the skin's real gradient with a tiny mock of the home screen on it */
+const ThemeChoice: React.FC<{
+  skin: Skin;
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}> = ({ skin, label, selected, onPress }) => {
+  const theme = skinThemes[skin];
+  return (
+    <TouchableOpacity
+      style={[styles.themeCard, selected && { borderColor: theme.accent }]}
+      onPress={onPress}
+      activeOpacity={0.85}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      accessibilityLabel={`${label} theme`}
+    >
+      <LinearGradient
+        colors={theme.background}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={styles.themePreview}
+      >
+        <View
+          style={[styles.themePreviewPill, { backgroundColor: theme.accent }]}
+        />
+        <View style={styles.themePreviewLine} />
+        <View style={[styles.themePreviewLine, styles.themePreviewLineShort]} />
+      </LinearGradient>
+      <View style={styles.themeCardFooter}>
+        <View style={[styles.themeDot, { backgroundColor: theme.accent }]} />
+        <Text style={styles.themeLabel}>{label}</Text>
+        {selected && (
+          <View style={[styles.themeCheck, { backgroundColor: theme.accent }]}>
+            <Ionicons name="checkmark" size={14} color={theme.accentInk} />
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+// --- Screen ------------------------------------------------------------------
 
 const Onboarding: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -504,8 +729,32 @@ const Onboarding: React.FC = () => {
   );
   const phraseIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Theme selection state
-  const [selectedTheme, setSelectedTheme] = useState<'pink' | 'blue'>('pink');
+  // Theme selection state; the whole screen is drawn in this skin
+  const [selectedTheme, setSelectedTheme] = useState<Skin>('blue');
+  const theme = getSkinTheme(selectedTheme);
+
+  // Each step's content fades and lifts into place
+  const enter = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    enter.setValue(0);
+    Animated.timing(enter, {
+      toValue: 1,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [currentStep, enter]);
+  const enterStyle = {
+    opacity: enter,
+    transform: [
+      {
+        translateY: enter.interpolate({
+          inputRange: [0, 1],
+          outputRange: [14, 0],
+        }),
+      },
+    ],
+  };
 
   useEffect(() => {
     if (isDownloading) {
@@ -526,6 +775,12 @@ const Onboarding: React.FC = () => {
     };
   }, [isDownloading]);
 
+  const goToStep = (index: number) => {
+    hapticTap();
+    setCurrentStep(index);
+  };
+  const goBack = () => goToStep(currentStep - 1);
+
   // --- handlers: step navigation ---
   const handleNext = () => {
     const stepDef = onboardingSteps[currentStep];
@@ -544,9 +799,9 @@ const Onboarding: React.FC = () => {
       return;
     }
 
-    if (currentStep < onboardingSteps.length - 1) {
-      setCurrentStep(currentStep + 1);
-      if (currentStep === 3) setHasScrolledToBottom(false); // reset after privacy step
+    if (currentStep < LAST_STEP) {
+      goToStep(currentStep + 1);
+      if (currentStep === PRIVACY_STEP) setHasScrolledToBottom(false); // reset after privacy step
     } else {
       handlePermissionRequest(); // media library permission (existing final step)
     }
@@ -719,7 +974,7 @@ const Onboarding: React.FC = () => {
       } else {
         await proceed();
       }
-    } catch (e) {
+    } catch {
       setIsDownloading(false);
       setDownloadProgress(0);
       Alert.alert(
@@ -765,679 +1020,607 @@ const Onboarding: React.FC = () => {
   const handleThemeSelection = async () => {
     try {
       await AsyncStorage.setItem('skin', selectedTheme);
-      setCurrentStep(currentStep + 1);
-    } catch (error) {
+      goToStep(currentStep + 1);
+    } catch {
       // Continue even if saving fails
-      setCurrentStep(currentStep + 1);
+      goToStep(currentStep + 1);
     }
   };
 
   const step = onboardingSteps[currentStep];
 
-  // --- Render Privacy step (unchanged) ---
-  if (currentStep === 3) {
-    return (
-      <SafeAreaView style={styles.container}>
+  /** Every step shares the backdrop, safe area, progress strip and pinned footer */
+  const renderFrame = (body: React.ReactNode, footer: React.ReactNode) => (
+    <ScreenBackground skin={selectedTheme}>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         <StatusBar barStyle="light-content" />
-        <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
-          <View style={styles.privacyContainer}>
-            <View style={styles.privacyHeader}>
-              <Text style={styles.icon}>{step.icon}</Text>
-              <Text style={styles.title}>{step.title}</Text>
-              <Text style={styles.subtitle}>{step.subtitle}</Text>
-            </View>
-            <View style={styles.agreementContainer}>
-              <ScrollView
-                style={styles.agreementScroll}
-                contentContainerStyle={styles.agreementContent}
-                onScroll={handleScroll}
-                scrollEventThrottle={16}
-                showsVerticalScrollIndicator
-              >
-                <Text style={styles.agreementText}>{privacyAgreementText}</Text>
-              </ScrollView>
-            </View>
-            <View
-              style={[
-                styles.bottomContainer,
-                { paddingBottom: insets.bottom || 16 },
-              ]}
-            >
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => setCurrentStep(currentStep - 1)}
-              >
-                <Text style={styles.backButtonText}>Back</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.nextButton,
-                  !hasScrolledToBottom && styles.disabledButton,
-                ]}
-                onPress={handleNext}
-                disabled={!hasScrolledToBottom}
-              >
-                <Text
-                  style={[
-                    styles.nextButtonText,
-                    !hasScrolledToBottom && styles.disabledButtonText,
-                  ]}
-                >
-                  {hasScrolledToBottom ? 'I Accept' : 'Scroll to Accept'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </LinearGradient>
+        <StepProgress current={currentStep} accent={theme.accent} />
+        {body}
+        {footer}
       </SafeAreaView>
+    </ScreenBackground>
+  );
+
+  // --- Render Privacy step ---
+  if (step?.type === 'privacy') {
+    return renderFrame(
+      <Animated.View style={[styles.privacyBody, enterStyle]}>
+        <View style={styles.privacyHeader}>
+          <Text style={styles.title}>{step.title}</Text>
+          <Text style={[styles.subtitle, { color: theme.accent }]}>
+            {step.subtitle}
+          </Text>
+        </View>
+        <View style={styles.agreementCard}>
+          <ScrollView
+            style={styles.agreementScroll}
+            contentContainerStyle={styles.agreementContent}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator
+          >
+            <Text style={styles.agreementText}>{privacyAgreementText}</Text>
+          </ScrollView>
+        </View>
+        {!hasScrolledToBottom && (
+          <Text style={styles.agreementHint}>
+            Scroll to the end of the agreement to continue
+          </Text>
+        )}
+      </Animated.View>,
+      <StepFooter
+        theme={theme}
+        bottomInset={insets.bottom}
+        onBack={goBack}
+        primaryLabel={hasScrolledToBottom ? 'I accept' : 'Scroll to accept'}
+        onPrimary={handleNext}
+        primaryDisabled={!hasScrolledToBottom}
+      />,
     );
   }
 
-  // --- NEW: Render Whisper Download step ---
+  // --- Render Whisper Download step ---
   if (step?.type === 'whisper_download') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" />
-        <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            bounces={false}
-          >
-            <View style={styles.progressContainer}>
-              {onboardingSteps.map((_, index) => (
+    const percent = Math.min(100, Math.max(0, downloadProgress));
+    return renderFrame(
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
+        <Animated.View style={[styles.content, enterStyle]}>
+          <StepHero
+            icon={isDownloading ? 'cloud-download-outline' : 'mic-outline'}
+            theme={theme}
+          />
+          <Text style={styles.title}>
+            {isDownloading
+              ? 'Downloading Whisper model'
+              : 'Download transcription model'}
+          </Text>
+          <Text style={[styles.subtitle, { color: theme.accent }]}>
+            Enables on-device voice-to-text
+          </Text>
+          <Text style={styles.description}>
+            {isDownloading
+              ? `Downloading ${APP_CONFIG.getWhisperModelName()} (${APP_CONFIG.getWhisperModelSize()}).`
+              : `Model: ${APP_CONFIG.getWhisperModelName()}\nSize: ${APP_CONFIG.getWhisperModelSize()}\n\nWi-Fi recommended.`}
+          </Text>
+
+          {isDownloading && (
+            <View style={styles.downloadCard}>
+              <View style={styles.downloadTrack}>
                 <View
-                  key={index}
                   style={[
-                    styles.progressDot,
-                    index <= currentStep && styles.activeProgressDot,
+                    styles.downloadFill,
+                    { width: `${percent}%`, backgroundColor: theme.accent },
                   ]}
                 />
-              ))}
-            </View>
-
-            <View style={styles.contentContainer}>
-              <Text style={styles.icon}>{isDownloading ? '📥' : '🎤'}</Text>
-              <Text style={styles.title}>
-                {isDownloading
-                  ? 'Downloading Whisper Model…'
-                  : 'Download Transcription Model'}
-              </Text>
-              <Text style={styles.subtitle}>
-                Enables on-device voice-to-text
-              </Text>
-              <Text style={styles.description}>
-                {isDownloading
-                  ? `Downloading ${APP_CONFIG.getWhisperModelName()} (${APP_CONFIG.getWhisperModelSize()}).`
-                  : `Model: ${APP_CONFIG.getWhisperModelName()}\nSize: ${APP_CONFIG.getWhisperModelSize()}\n\nWi-Fi recommended.`}
-              </Text>
-
-              {isDownloading && (
-                <View style={{ marginTop: 24, alignItems: 'center' }}>
-                  <ActivityIndicator size="large" />
-                  <Text style={{ color: '#fff', marginTop: 16 }}>
-                    {currentPhrase}
-                  </Text>
-                  <Text style={{ color: '#fff', marginTop: 8 }}>
-                    {`${Math.min(100, Math.max(0, downloadProgress)).toFixed(
-                      0,
-                    )}%`}
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            <View
-              style={[
-                styles.bottomContainer,
-                { paddingBottom: insets.bottom || 16 },
-              ]}
-            >
-              {currentStep > 0 && (
-                <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={() => setCurrentStep(currentStep - 1)}
-                  disabled={isDownloading}
-                >
-                  <Text style={styles.backButtonText}>Back</Text>
-                </TouchableOpacity>
-              )}
-              {!isDownloading && (
-                <TouchableOpacity
-                  style={styles.nextButton}
-                  onPress={handleNext}
-                >
-                  <Text style={styles.nextButtonText}>Start Download</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </ScrollView>
-        </LinearGradient>
-      </SafeAreaView>
-    );
-  }
-
-  // --- NEW: Render Microphone Permission step ---
-  if (step?.type === 'microphone_permission') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" />
-        <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            bounces={false}
-          >
-            <View style={styles.progressContainer}>
-              {onboardingSteps.map((_, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.progressDot,
-                    index <= currentStep && styles.activeProgressDot,
-                  ]}
-                />
-              ))}
-            </View>
-
-            <View style={styles.contentContainer}>
-              <Text style={styles.icon}>🎙️</Text>
-              <Text style={styles.title}>Microphone Permission</Text>
-              <Text style={styles.subtitle}>
-                Required for voice transcription
-              </Text>
-              <Text style={styles.description}>
-                Your voice stays on device. We never upload audio.
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.bottomContainer,
-                { paddingBottom: insets.bottom || 16 },
-              ]}
-            >
-              {currentStep > 0 && (
-                <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={() => setCurrentStep(currentStep - 1)}
-                >
-                  <Text style={styles.backButtonText}>Back</Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
-                <Text style={styles.nextButtonText}>Grant Access</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </LinearGradient>
-      </SafeAreaView>
-    );
-  }
-
-  // --- NEW: Render Theme Selection step ---
-  if (step?.type === 'theme_selection') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" />
-        <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            bounces={false}
-          >
-            <View style={styles.progressContainer}>
-              {onboardingSteps.map((_, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.progressDot,
-                    index <= currentStep && styles.activeProgressDot,
-                  ]}
-                />
-              ))}
-            </View>
-
-            <View style={styles.contentContainer}>
-              <Text style={styles.icon}>🎨</Text>
-              <Text style={styles.title}>Choose Your Theme</Text>
-              <Text style={styles.subtitle}>Pick your favorite color</Text>
-              <Text style={styles.description}>
-                Select a theme that matches your style. You can change this
-                later in settings.
-              </Text>
-
-              <View style={styles.themeSelectorContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.themeOption,
-                    selectedTheme === 'pink' && styles.themeOptionActive,
-                  ]}
-                  onPress={() => setSelectedTheme('pink')}
-                >
-                  <LinearGradient
-                    colors={['#FFB3C1', '#FFD6E0']}
-                    style={styles.themeGradient}
-                  >
-                    <Text style={styles.themeEmoji}>🌸</Text>
-                    <Text
-                      style={[
-                        styles.themeOptionText,
-                        selectedTheme === 'pink' &&
-                          styles.themeOptionTextActive,
-                      ]}
-                    >
-                      Pink
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.themeOption,
-                    selectedTheme === 'blue' && styles.themeOptionActive,
-                  ]}
-                  onPress={() => setSelectedTheme('blue')}
-                >
-                  <LinearGradient
-                    colors={['#9FD3FF', '#CBE7FF']}
-                    style={styles.themeGradient}
-                  >
-                    <Text style={styles.themeEmoji}>💙</Text>
-                    <Text
-                      style={[
-                        styles.themeOptionText,
-                        selectedTheme === 'blue' &&
-                          styles.themeOptionTextActive,
-                      ]}
-                    >
-                      Blue
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
+              </View>
+              <View style={styles.downloadRow}>
+                <Text style={styles.downloadPhrase} numberOfLines={1}>
+                  {currentPhrase}
+                </Text>
+                <Text style={styles.downloadPercent}>
+                  {`${percent.toFixed(0)}%`}
+                </Text>
               </View>
             </View>
-
-            <View
-              style={[
-                styles.bottomContainer,
-                { paddingBottom: insets.bottom || 16 },
-              ]}
-            >
-              {currentStep > 0 && (
-                <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={() => setCurrentStep(currentStep - 1)}
-                >
-                  <Text style={styles.backButtonText}>Back</Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
-                <Text style={styles.nextButtonText}>Continue</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </LinearGradient>
-      </SafeAreaView>
+          )}
+        </Animated.View>
+      </ScrollView>,
+      <StepFooter
+        theme={theme}
+        bottomInset={insets.bottom}
+        onBack={currentStep > 0 ? goBack : undefined}
+        backDisabled={isDownloading}
+        primaryLabel="Start download"
+        onPrimary={handleNext}
+        primaryLoading={isDownloading}
+      />,
     );
   }
 
-  // --- Render Interactive Swipe step (unchanged appearance) ---
+  // --- Render Microphone Permission step ---
+  if (step?.type === 'microphone_permission') {
+    return renderFrame(
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
+        <Animated.View style={[styles.content, enterStyle]}>
+          <StepHero icon="mic-outline" theme={theme} />
+          <Text style={styles.title}>Microphone permission</Text>
+          <Text style={[styles.subtitle, { color: theme.accent }]}>
+            Required for voice transcription
+          </Text>
+          <Text style={styles.description}>
+            Your voice stays on device. We never upload audio.
+          </Text>
+        </Animated.View>
+      </ScrollView>,
+      <StepFooter
+        theme={theme}
+        bottomInset={insets.bottom}
+        onBack={currentStep > 0 ? goBack : undefined}
+        primaryLabel="Grant access"
+        onPrimary={handleNext}
+      />,
+    );
+  }
+
+  // --- Render Theme Selection step ---
+  if (step?.type === 'theme_selection') {
+    return renderFrame(
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
+        <Animated.View style={[styles.content, enterStyle]}>
+          <StepHero icon={step.icon} theme={theme} />
+          <StepCopy step={step} theme={theme} />
+          <View style={styles.themeRow}>
+            <ThemeChoice
+              skin="blue"
+              label="Teal"
+              selected={selectedTheme === 'blue'}
+              onPress={() => setSelectedTheme('blue')}
+            />
+            <ThemeChoice
+              skin="pink"
+              label="Pink"
+              selected={selectedTheme === 'pink'}
+              onPress={() => setSelectedTheme('pink')}
+            />
+          </View>
+        </Animated.View>
+      </ScrollView>,
+      <StepFooter
+        theme={theme}
+        bottomInset={insets.bottom}
+        onBack={currentStep > 0 ? goBack : undefined}
+        primaryLabel="Continue"
+        onPrimary={handleNext}
+      />,
+    );
+  }
+
+  // --- Render Interactive Swipe step ---
   if (step?.type === 'interactive_swipe') {
     const phaseLabel =
       swipePhase === 'right'
-        ? 'Swipe Right'
+        ? 'Swipe right'
         : swipePhase === 'left'
-        ? 'Swipe Left'
-        : 'Swipe Up';
+        ? 'Swipe left'
+        : 'Swipe up';
     const phaseArrow =
-      swipePhase === 'right' ? '➡️' : swipePhase === 'left' ? '⬅️' : '⬆️';
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" />
-        <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
-          <PanGestureHandler onHandlerStateChange={handleSwipeGesture}>
-            <View style={styles.interactiveContainer}>
-              <View>
-                <View style={styles.progressContainer}>
-                  {onboardingSteps.map((_, index) => (
-                    <View
-                      key={index}
-                      style={[
-                        styles.progressDot,
-                        index <= currentStep && styles.activeProgressDot,
-                      ]}
-                    />
-                  ))}
-                </View>
-              </View>
-              <View style={styles.contentContainer}>
-                <View style={styles.interactiveArea}>
-                  {swipePhase === 'up' && (
-                    <View style={styles.trashContainer}>
-                      <Text style={styles.trashIcon}>🗑️</Text>
-                    </View>
-                  )}
-                  {logoVisible && (
-                    <Animated.View
-                      style={[styles.animatedImage, { opacity: logoOpacity }]}
-                    >
-                      <Image
-                        source={LOGO_IMAGE}
-                        style={styles.onboardingImage}
-                        resizeMode="contain"
-                      />
-                    </Animated.View>
-                  )}
-                  <View style={styles.arrowLabelContainer}>
-                    <Text style={styles.arrowText}>{phaseArrow}</Text>
-                    <Text style={styles.arrowLabelBig}>{phaseLabel}</Text>
-                  </View>
-                </View>
-              </View>
-              <View
-                style={[
-                  styles.bottomContainer,
-                  { paddingBottom: insets.bottom || 16 },
-                ]}
-              >
-                <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={goToPrevSwipePhase}
-                >
-                  <Text style={styles.backButtonText}>Back</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.nextButton}
-                  onPress={handleSkipSwipe}
-                >
-                  <Text style={styles.nextButtonText}>Skip</Text>
-                </TouchableOpacity>
-              </View>
+      swipePhase === 'right'
+        ? 'arrow-forward'
+        : swipePhase === 'left'
+        ? 'arrow-back'
+        : 'arrow-up';
+    return renderFrame(
+      <PanGestureHandler onHandlerStateChange={handleSwipeGesture}>
+        <View style={styles.interactiveContainer}>
+          {swipePhase === 'up' && (
+            <View style={styles.trashRing}>
+              <Ionicons name="trash-outline" size={22} color={colors.text} />
             </View>
-          </PanGestureHandler>
-        </LinearGradient>
-      </SafeAreaView>
+          )}
+          {logoVisible && (
+            <Animated.View
+              style={[styles.animatedImage, { opacity: logoOpacity }]}
+            >
+              <Image
+                source={LOGO_IMAGE}
+                style={styles.onboardingImage}
+                resizeMode="contain"
+              />
+            </Animated.View>
+          )}
+          <View style={styles.arrowLabelContainer}>
+            <Ionicons name={phaseArrow} size={36} color={theme.accent} />
+            <Text style={styles.arrowLabel}>{phaseLabel}</Text>
+          </View>
+        </View>
+      </PanGestureHandler>,
+      <StepFooter
+        theme={theme}
+        bottomInset={insets.bottom}
+        onBack={goToPrevSwipePhase}
+        primaryLabel="Skip"
+        onPrimary={handleSkipSwipe}
+      />,
     );
   }
 
   // --- Default generic steps (welcome/smart/safe + final photos permission) ---
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-        >
-          <View style={styles.progressContainer}>
-            {onboardingSteps.map((_, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.progressDot,
-                  index <= currentStep && styles.activeProgressDot,
-                ]}
-              />
-            ))}
-          </View>
-          <View style={styles.contentContainer}>
-            <Text style={styles.icon}>{step.icon}</Text>
-            <Text style={styles.title}>{step.title}</Text>
-            <Text style={styles.subtitle}>{step.subtitle}</Text>
-            <Text style={styles.description}>{step.description}</Text>
-          </View>
-          <View
-            style={[
-              styles.bottomContainer,
-              { paddingBottom: insets.bottom || 16 },
-            ]}
-          >
-            {currentStep > 0 && (
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => setCurrentStep(currentStep - 1)}
-              >
-                <Text style={styles.backButtonText}>Back</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={[
-                styles.nextButton,
-                currentStep === 0 && styles.singleButton,
-              ]}
-              onPress={handleNext}
-              disabled={isRequestingPermission}
-            >
-              <Text style={styles.nextButtonText}>
-                {isRequestingPermission
-                  ? 'Requesting...'
-                  : currentStep === onboardingSteps.length - 1
-                  ? 'Continue'
-                  : 'Next'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </LinearGradient>
-    </SafeAreaView>
+  const isLast = currentStep === LAST_STEP;
+  return renderFrame(
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+      bounces={false}
+    >
+      <Animated.View style={[styles.content, enterStyle]}>
+        <StepHero icon={step.icon} theme={theme} brand={currentStep === 0} />
+        <StepCopy step={step} theme={theme} />
+        {step.highlights && (
+          <HighlightCard highlights={step.highlights} theme={theme} />
+        )}
+      </Animated.View>
+    </ScrollView>,
+    <StepFooter
+      theme={theme}
+      bottomInset={insets.bottom}
+      onBack={currentStep > 0 ? goBack : undefined}
+      primaryLabel={isLast ? 'Allow photo access' : 'Continue'}
+      onPrimary={handleNext}
+      primaryLoading={isRequestingPermission}
+    />,
   );
 };
 
-// --- styles (unchanged from your file) ---
+// --- styles ------------------------------------------------------------------
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  gradient: { flex: 1 },
+  container: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  progressTrack: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  progressSegment: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.surfaceRaised,
+  },
+  progressLabel: {
+    marginLeft: 14,
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+    fontVariant: ['tabular-nums'],
+  },
   scrollContent: {
     flexGrow: 1,
+    justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingTop: responsiveValues.topPadding,
-    paddingBottom: responsiveValues.bottomPadding,
-    justifyContent: 'space-between',
-    minHeight: height - 100,
+    paddingVertical: getResponsiveSize(12, 20, 28),
   },
-  progressContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: responsiveValues.progressMargin,
-  },
-  progressDot: {
-    width: getResponsiveSize(10, 12, 12),
-    height: getResponsiveSize(10, 12, 12),
-    borderRadius: getResponsiveSize(5, 6, 6),
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    marginHorizontal: 6,
-  },
-  activeProgressDot: { backgroundColor: '#ffffff' },
-  contentContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  content: {
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 40,
   },
-  icon: {
-    fontSize: responsiveValues.iconSize,
-    marginBottom: responsiveValues.iconMargin,
-    textAlign: 'center',
+  heroRing: {
+    width: HERO_SIZE,
+    height: HERO_SIZE,
+    borderRadius: HERO_SIZE / 2,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: getResponsiveSize(18, 22, 26),
+  },
+  heroMark: {
+    width: HERO_SIZE * 0.6,
+    height: HERO_SIZE * 0.6,
   },
   title: {
-    fontSize: responsiveValues.titleSize,
+    fontSize: TITLE_SIZE,
+    lineHeight: TITLE_SIZE * 1.2,
     fontWeight: '800',
-    color: '#ffffff',
+    letterSpacing: -0.3,
+    color: colors.text,
     textAlign: 'center',
-    marginBottom: responsiveValues.titleMargin,
+    marginBottom: 8,
   },
   subtitle: {
-    fontSize: responsiveValues.subtitleSize,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
     textAlign: 'center',
-    marginBottom: responsiveValues.subtitleMargin,
-    opacity: 0.9,
+    marginBottom: 12,
   },
   description: {
-    fontSize: responsiveValues.descriptionSize,
-    color: '#ffffff',
+    fontSize: BODY_SIZE,
+    lineHeight: BODY_SIZE * 1.5,
+    color: colors.textSecondary,
     textAlign: 'center',
-    lineHeight: responsiveValues.descriptionSize * 1.5,
-    opacity: 0.8,
-    paddingHorizontal: isSmallScreen ? 10 : 0,
+    paddingHorizontal: 4,
   },
-  bottomContainer: {
+  highlightCard: {
+    alignSelf: 'stretch',
+    marginTop: getResponsiveSize(20, 26, 32),
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    paddingHorizontal: 16,
+  },
+  highlightRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: height * 0.02,
-    marginTop: 20,
+    paddingVertical: 13,
+  },
+  highlightRowDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  highlightIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  highlightText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    gap: 12,
   },
   backButton: {
-    paddingHorizontal: 24,
-    paddingVertical: responsiveValues.buttonPadding,
-    borderRadius: 25,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    flex: 1,
-    marginRight: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 52,
+    paddingLeft: 12,
+    paddingRight: 18,
+    borderRadius: radius.md + 2,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   backButtonText: {
-    color: '#ffffff',
-    fontSize: responsiveValues.buttonText,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  nextButton: {
-    paddingHorizontal: 24,
-    paddingVertical: responsiveValues.buttonPadding,
-    borderRadius: 25,
-    backgroundColor: '#ffffff',
-    flex: 1,
-    marginLeft: 12,
-  },
-  singleButton: { marginLeft: 0 },
-  nextButtonText: {
-    color: '#667eea',
-    fontSize: responsiveValues.buttonText,
+    fontSize: 15,
     fontWeight: '700',
+    color: colors.textSecondary,
+    marginLeft: 2,
+  },
+  buttonDimmed: {
+    opacity: 0.4,
+  },
+  primaryButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: radius.md + 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  primaryButtonDisabled: {
+    backgroundColor: colors.surfaceRaised,
+  },
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  primaryButtonTextDisabled: {
+    color: colors.textMuted,
+  },
+
+  // privacy
+  privacyBody: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: getResponsiveSize(8, 14, 20),
+  },
+  privacyHeader: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  agreementCard: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+  },
+  agreementScroll: {
+    flex: 1,
+  },
+  agreementContent: {
+    padding: 18,
+  },
+  agreementText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.textSecondary,
+  },
+  agreementHint: {
+    marginTop: 10,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
     textAlign: 'center',
   },
 
-  // privacy styles
-  privacyContainer: {
+  // whisper download
+  downloadCard: {
+    alignSelf: 'stretch',
+    marginTop: 28,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    padding: 16,
+  },
+  downloadTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.surfaceRaised,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  downloadFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  downloadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  downloadPhrase: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: responsiveValues.topPadding,
-    paddingBottom: responsiveValues.bottomPadding,
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginRight: 12,
   },
-  privacyHeader: { alignItems: 'center', marginBottom: 20 },
-  agreementContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 12,
-    marginBottom: 20,
+  downloadPercent: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
   },
-  agreementScroll: { flex: 1 },
-  agreementContent: { padding: 20 },
-  agreementText: {
-    fontSize: responsiveValues.descriptionSize - 1,
-    color: '#ffffff',
-    lineHeight: (responsiveValues.descriptionSize - 1) * 1.4,
-    opacity: 0.9,
-  },
-  disabledButton: { backgroundColor: 'rgba(255, 255, 255, 0.3)' },
-  disabledButtonText: { color: 'rgba(255, 255, 255, 0.6)' },
 
   // interactive swipe
   interactiveContainer: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: responsiveValues.topPadding,
-    paddingBottom: responsiveValues.bottomPadding,
-  },
-  onboardingImage: { width: '100%', height: '100%', borderRadius: 24 },
-  interactiveArea: {
-    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    marginTop: 40,
-  },
-  trashContainer: {
-    width: width * 0.1,
-    height: width * 0.1,
-    borderRadius: width * 0.05,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  trashRing: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 20,
   },
-  trashIcon: { fontSize: width * 0.05 },
   animatedImage: {
     width: width * 0.7,
     height: height * 0.35,
-    borderRadius: 24,
-    backgroundColor: '#fff',
-    alignSelf: 'center',
+    borderRadius: radius.xl,
+    backgroundColor: colors.sheet,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 10,
   },
-  arrowText: { fontSize: width * 0.1, color: '#ffffff', fontWeight: 'bold' },
-  arrowLabelBig: {
-    fontSize: responsiveValues.subtitleSize + 2,
-    color: '#ffffff',
-    marginTop: 8,
-    textAlign: 'center',
+  onboardingImage: {
+    width: '100%',
+    height: '100%',
   },
   arrowLabelContainer: {
-    position: 'absolute',
-    bottom: -height * 0.15,
     alignItems: 'center',
+    marginTop: 28,
+  },
+  arrowLabel: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text,
+    marginTop: 6,
   },
 
-  // Theme selection styles
-  themeSelectorContainer: {
+  // theme selection
+  themeRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-    marginTop: 40,
-    paddingHorizontal: 20,
+    alignSelf: 'stretch',
+    gap: 14,
+    marginTop: getResponsiveSize(22, 28, 34),
   },
-  themeOption: {
-    width: width * 0.35,
-    height: width * 0.35,
-    borderRadius: 20,
-    overflow: 'hidden',
-    borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  themeOptionActive: {
-    borderColor: '#ffffff',
-    borderWidth: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  themeGradient: {
+  themeCard: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    borderRadius: radius.lg,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
   },
-  themeEmoji: {
-    fontSize: 50,
+  themePreview: {
+    height: getResponsiveSize(104, 120, 132),
+    padding: 14,
+    justifyContent: 'flex-end',
+  },
+  themePreviewPill: {
+    width: 44,
+    height: 10,
+    borderRadius: 5,
     marginBottom: 10,
   },
-  themeOptionText: {
-    fontSize: responsiveValues.subtitleSize,
-    fontWeight: '600',
-    color: '#ffffff',
-    textAlign: 'center',
+  themePreviewLine: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.surfaceRaised,
+    marginBottom: 6,
   },
-  themeOptionTextActive: {
-    fontWeight: '800',
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
+  themePreviewLineShort: {
+    width: '60%',
+    marginBottom: 0,
+  },
+  themeCardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  themeDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  themeLabel: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  themeCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

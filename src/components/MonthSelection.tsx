@@ -5,12 +5,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
-  SafeAreaView,
   StatusBar,
   Platform,
   PlatformColor,
   ImageBackground,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import {
   LiquidGlassView,

@@ -7,11 +7,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  SafeAreaView,
   StatusBar,
   Dimensions,
   Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useMedia, MediaItem } from '../context/MediaContext';
 

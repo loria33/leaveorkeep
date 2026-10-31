@@ -1,9 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { MediaItem } from '../context/MediaContext';
 import {
+  fetchLibraryBySizeNative,
   fetchMonthPhotosNative,
   fetchMonthPhotosRankedNative,
 } from '../native/PhotoMonths';
+
+/**
+ * Pseudo month key for the whole-library size scan: every page is the entire
+ * library ordered biggest file first, regardless of the user's sort mode.
+ */
+export const SIZE_SCAN_KEY = 'SIZE_SCAN_ALL';
 
 /**
  * How a month is ordered in the viewer.
@@ -49,6 +56,9 @@ export const fetchMonthPage = async (
   offset: number,
   limit: number,
 ): Promise<MediaItem[] | null> => {
+  if (monthKey === SIZE_SCAN_KEY) {
+    return fetchLibraryBySizeNative(offset, limit);
+  }
   if (currentSortMode === 'junk') {
     const ranked = await fetchMonthPhotosRankedNative(monthKey, offset, limit);
     if (ranked) return ranked;
